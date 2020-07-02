@@ -85,13 +85,16 @@ public class LocalAssembler extends PairWalker {
 
         final String outputFilePrefix = output != null ? output : assemblyName;
         final List<Path> readPaths = pathReads(kmerAdjacencySet);
-        final Map<Contig,List<TransitPairCount>> contigTransitsMap = collectTransitPairCounts(contigs, readPaths);
+        final Map<Contig,List<TransitPairCount>> contigTransitsMap =
+                collectTransitPairCounts(contigs, readPaths);
         final String traversalsFilename = outputFilePrefix + ".traversals.fa.gz";
         try {
-            final Collection<Traversal> allTraversals = traverseAllPaths(contigs, contigTransitsMap);
+            final Collection<Traversal> allTraversals =
+                    traverseAllPaths(contigs, readPaths, contigTransitsMap);
             writeTraversals(allTraversals, traversalsFilename);
         } catch ( final AssemblyTooComplexException x ) {
-            logger.warn("Assembly too complex.  Writing contigs as traversals in " + traversalsFilename + ".");
+            logger.warn("Assembly too complex.  Writing contigs as traversals in " +
+                    traversalsFilename + ".");
             final Collection<Traversal> contigTraversals = new ArrayList<>(contigs.size());
             for ( final Contig contig : contigs ) {
                 contigTraversals.add(new Traversal(Collections.singletonList(contig)));
@@ -110,11 +113,14 @@ public class LocalAssembler extends PairWalker {
     /** trim read pairs of base calls that have gone past the end of a short fragment */
     private void trimOverruns( final GATKRead read, final GATKRead mate ) {
         // if both mapped and they're on different strands
-        if ( !read.isUnmapped() && !mate.isUnmapped() && read.isReverseStrand() != mate.isReverseStrand() ) {
+        if ( !read.isUnmapped() && !mate.isUnmapped() &&
+                read.isReverseStrand() != mate.isReverseStrand() ) {
             // and both start within 1 base on the ref
             if ( Math.abs(read.getStart() - read.getMateStart()) <= 1 ) {
                 // and both end within 1 base
-                if ( Math.abs(read.getCigar().getReferenceLength() - mate.getCigar().getReferenceLength()) <= 1 ) {
+                final int readRefLen = read.getCigar().getReferenceLength();
+                final int mateRefLen = mate.getCigar().getReferenceLength();
+                if ( Math.abs(readRefLen - mateRefLen) <= 1 ) {
                     if ( mate.isReverseStrand() ) {
                         trimClips(read, mate);
                     } else {
@@ -131,13 +137,15 @@ public class LocalAssembler extends PairWalker {
         final int lastElementIdx = fwdElements.size() - 1;
         final CigarElement fwdLastElement = fwdElements.get(lastElementIdx);
         final CigarElement revFirstElement = revElements.get(0);
-        if ( fwdLastElement.getOperator() == CigarOperator.S && revFirstElement.getOperator() == CigarOperator.S ) {
+        if ( fwdLastElement.getOperator() == CigarOperator.S &&
+                revFirstElement.getOperator() == CigarOperator.S ) {
             final byte[] fwdBases = fwd.getBasesNoCopy();
             final int lastElementLen = fwdLastElement.getLength();
             fwd.setBases(Arrays.copyOfRange(fwdBases, 0, fwdBases.length - lastElementLen));
             final byte[] fwdQuals = fwd.getBaseQualitiesNoCopy();
             if ( fwdQuals.length > 0 ) {
-                fwd.setBaseQualities(Arrays.copyOfRange(fwdQuals, 0, fwdQuals.length - lastElementLen));
+                final int qualsLen = fwdQuals.length - lastElementLen;
+                fwd.setBaseQualities(Arrays.copyOfRange(fwdQuals, 0, qualsLen));
             }
             final List<CigarElement> newFwdElements = new ArrayList<>(fwdElements);
             newFwdElements.set(lastElementIdx, new CigarElement(lastElementLen, CigarOperator.H));
@@ -203,13 +211,13 @@ public class LocalAssembler extends PairWalker {
             final KmerAdjacency fwdKmer = contig.getFirstKmer();
             final KmerAdjacency revKmer = contig.getLastKmer().rc();
             if ( fwdKmer == revKmer ) {
-                contigEnds.findOrAdd(fwdKmer,
-                        kmer -> new ContigEndKmer(((Kmer)kmer).getKVal(), contig, ContigOrientation.BOTH));
+                contigEnds.findOrAdd(fwdKmer, kmer ->
+                        new ContigEndKmer(((Kmer)kmer).getKVal(), contig, ContigOrientation.BOTH));
             } else {
-                contigEnds.findOrAdd(fwdKmer,
-                        kmer -> new ContigEndKmer(((Kmer)kmer).getKVal(), contig, ContigOrientation.FWD));
-                contigEnds.findOrAdd(revKmer,
-                        kmer -> new ContigEndKmer(((Kmer)kmer).getKVal(), contig, ContigOrientation.REV));
+                contigEnds.findOrAdd(fwdKmer, kmer ->
+                        new ContigEndKmer(((Kmer)kmer).getKVal(), contig, ContigOrientation.FWD));
+                contigEnds.findOrAdd(revKmer, kmer ->
+                        new ContigEndKmer(((Kmer)kmer).getKVal(), contig, ContigOrientation.REV));
             }
         }
 
@@ -223,7 +231,8 @@ public class LocalAssembler extends PairWalker {
                 final int mask = start.getPredecessorMask();
                 for ( int call = 0; call != 4; ++call ) {
                     if ( (mask & (1 << call)) != 0 ) {
-                        final long kVal = KmerAdjacency.reverseComplement(start.getPredecessorVal(call));
+                        final long kVal =
+                                KmerAdjacency.reverseComplement(start.getPredecessorVal(call));
                         final ContigEndKmer contigEndKmer = contigEnds.find(new Kmer(kVal));
                         switch ( contigEndKmer.getContigOrientation() ) {
                             case FWD:
@@ -343,7 +352,8 @@ public class LocalAssembler extends PairWalker {
         return cutData;
     }
 
-    private static void unlinkContig( final Contig contig, final KmerSet<KmerAdjacency> kmerAdjacencySet ) {
+    private static void unlinkContig( final Contig contig,
+                                      final KmerSet<KmerAdjacency> kmerAdjacencySet ) {
         final KmerAdjacency firstKmer = contig.getFirstKmer();
         final int firstKmerFinalCall = firstKmer.getFinalCall();
         for ( final Contig predecessor : contig.getPredecessors() ) {
@@ -375,8 +385,9 @@ public class LocalAssembler extends PairWalker {
         } while ( kmer != lastKmer );
     }
 
-    private static void updateKmerContig( final KmerAdjacency firstKmer, final KmerAdjacency lastKmer,
-                                         final Contig contig ) {
+    private static void updateKmerContig( final KmerAdjacency firstKmer,
+                                          final KmerAdjacency lastKmer,
+                                          final Contig contig ) {
         int offset = 0;
         for ( KmerAdjacency kmer = firstKmer; kmer != lastKmer; kmer = kmer.getSoleSuccessor() ) {
             if ( kmer == null ) {
@@ -395,7 +406,8 @@ public class LocalAssembler extends PairWalker {
             final ContigImpl contig = contigs.get(contigId);
             if ( contig.getSuccessors().size() == 1 ) {
                 final Contig successor = contig.getSuccessors().get(0);
-                if ( successor != contig && successor != contig.rc() && successor.getPredecessors().size() == 1 ) {
+                if ( successor != contig && successor != contig.rc() &&
+                        successor.getPredecessors().size() == 1 ) {
                     contigs.set(contigId, join(contig, successor));
                     if ( !contigs.remove(successor.canonical()) ) {
                         throw new GATKException("successor linkage is messed up");
@@ -406,7 +418,8 @@ public class LocalAssembler extends PairWalker {
             }
             if ( contig.getPredecessors().size() == 1 ) {
                 final Contig predecessor = contig.getPredecessors().get(0);
-                if ( predecessor != contig && predecessor != contig.rc() && predecessor.getSuccessors().size() == 1 ) {
+                if ( predecessor != contig && predecessor != contig.rc() &&
+                        predecessor.getSuccessors().size() == 1 ) {
                     contigs.set(contigId, join(predecessor, contig));
                     if ( !contigs.remove(predecessor.canonical()) ) {
                         throw new GATKException("predecessor linkage is messed up");
@@ -487,7 +500,8 @@ public class LocalAssembler extends PairWalker {
         for ( final Contig successor : contig.getSuccessors() ) {
             final CutData successorCutData = successor.getCutData();
             if ( successorCutData == null ) {
-                cutData.minVisitNum = Math.min(cutData.minVisitNum, markCyclesRecursion(successor, deque).minVisitNum);
+                final int recursionVisitNum = markCyclesRecursion(successor, deque).minVisitNum;
+                cutData.minVisitNum = Math.min(cutData.minVisitNum, recursionVisitNum);
             } else {
                 cutData.minVisitNum = Math.min(cutData.minVisitNum, successorCutData.visitNum);
             }
@@ -562,9 +576,11 @@ public class LocalAssembler extends PairWalker {
         return readPaths;
     }
 
-    private static Map<Contig,List<TransitPairCount>> collectTransitPairCounts( final List<ContigImpl> contigs,
-                                                                                final List<Path> readPaths ) {
-        final Map<Contig,List<TransitPairCount>> contigTransitsMap = new HashMap<>(3 * contigs.size());
+    private static Map<Contig,List<TransitPairCount>> collectTransitPairCounts(
+            final List<ContigImpl> contigs,
+            final List<Path> readPaths ) {
+        final Map<Contig,List<TransitPairCount>> contigTransitsMap =
+                new HashMap<>(3 * contigs.size());
         for ( final Path path : readPaths ) {
             final List<PathPart> parts = path.getParts();
             final int nParts = parts.size();
@@ -604,19 +620,23 @@ public class LocalAssembler extends PairWalker {
         transitPairList.get(idx).observe();
     }
 
-    private static Set<Traversal> traverseAllPaths( final List<ContigImpl> contigs,
-                                                    final Map<Contig, List<TransitPairCount>> contigTransitsMap ) {
+    private static Set<Traversal> traverseAllPaths(
+            final List<ContigImpl> contigs,
+            final List<Path> readPaths,
+            final Map<Contig, List<TransitPairCount>> contigTransitsMap ) {
         final Set<Traversal> traversalSet = new HashSet<>();
         final Deque<Contig> contigsList = new ArrayDeque<>();
         for ( final Contig contig : contigs ) {
             if ( !contigTransitsMap.containsKey(contig) ) {
                 boolean done = false;
                 for ( final Contig successor : contig.getSuccessors() ) {
-                    traverse(successor, contig, contigsList, contigTransitsMap, traversalSet);
+                    traverse(successor, contig,
+                            contigsList, readPaths, contigTransitsMap, traversalSet);
                     done = true;
                 }
                 for ( final Contig predecessor : contig.getPredecessors() ) {
-                    traverse(predecessor.rc(), contig.rc(), contigsList, contigTransitsMap, traversalSet);
+                    traverse(predecessor.rc(), contig.rc(),
+                            contigsList, readPaths, contigTransitsMap, traversalSet);
                     done = true;
                 }
                 if ( !done ) { // if there were no predecessors or successors, it stands alone
@@ -626,14 +646,17 @@ public class LocalAssembler extends PairWalker {
         }
 
         // look for transits that haven't been traced
-        for ( final Map.Entry<Contig, List<TransitPairCount>> entry : contigTransitsMap.entrySet() ) {
+        for ( final Map.Entry<Contig, List<TransitPairCount>> entry :
+                contigTransitsMap.entrySet() ) {
             for ( final TransitPairCount tpc : entry.getValue() ) {
                 if ( tpc.getCount() > 0 ) {
                     final Contig contig = entry.getKey();
                     final Set<Traversal> fwdTraversalSet = new HashSet<>();
-                    traverse(tpc.getContig2(), contig, contigsList, contigTransitsMap, fwdTraversalSet);
+                    traverse(tpc.getContig2(), contig,
+                            contigsList, readPaths, contigTransitsMap, fwdTraversalSet);
                     final Set<Traversal> revTraversalSet = new HashSet<>();
-                    traverse(tpc.getContig1().rc(), contig.rc(), contigsList, contigTransitsMap, revTraversalSet);
+                    traverse(tpc.getContig1().rc(), contig.rc(),
+                            contigsList, readPaths, contigTransitsMap, revTraversalSet);
                     for ( final Traversal revTraversal : revTraversalSet ) {
                         final Traversal revTraversalRC = revTraversal.rc();
                         for ( final Traversal fwdTraversal : fwdTraversalSet ) {
@@ -650,16 +673,47 @@ public class LocalAssembler extends PairWalker {
     private static void traverse( final Contig contig,
                                   final Contig predecessor,
                                   final Deque<Contig> contigsList,
+                                  final List<Path> readPaths,
                                   final Map<Contig, List<TransitPairCount>> contigTransitsMap,
                                   final Set<Traversal> traversalSet ) {
         contigsList.addLast(predecessor);
-        final List<TransitPairCount> transits = contigsList.contains(contig) ? null : contigTransitsMap.get(contig);
+        final List<TransitPairCount> transits =
+                contigsList.contains(contig) ? null : contigTransitsMap.get(contig);
         boolean done = false;
         if ( transits != null ) {
             for ( final TransitPairCount tpc : transits ) {
                 if ( tpc.getContig1() == predecessor ) {
-                    tpc.resetCount();
-                    traverse(tpc.getContig2(), contig, contigsList, contigTransitsMap, traversalSet);
+                    final Contig successor = tpc.getContig2();
+                    clearTransitPairCount(contigTransitsMap, predecessor, contig, successor);
+                    if ( successor.rc() != contig ) {
+                        traverse(tpc.getContig2(), contig,
+                                contigsList, readPaths, contigTransitsMap, traversalSet);
+                    } else { // we're going palindromic
+                        final List<Contig> toMatch = new ArrayList<>(3);
+                        toMatch.add(predecessor);
+                        toMatch.add(contig);
+                        toMatch.add(successor);
+                        final List<List<Contig>> longestPaths =
+                                findLongestPaths(toMatch, readPaths);
+                        contigsList.addLast(contig);
+                        contigsList.addLast(successor);
+                        if ( longestPaths.isEmpty() ) {
+                            addTraversal(contigsList, traversalSet);
+                        } else {
+                            for ( final List<Contig> suffix : longestPaths ) {
+                                contigsList.addAll(suffix);
+                                addTraversal(contigsList, traversalSet);
+                                Contig prev = contig;
+                                Contig cur = successor;
+                                for ( final Contig next : suffix ) {
+                                    contigsList.removeLast();
+                                    clearTransitPairCount(contigTransitsMap, prev, cur, next);
+                                }
+                            }
+                        }
+                        contigsList.removeLast();
+                        contigsList.removeLast();
+                    }
                     done = true;
                 }
             }
@@ -672,7 +726,8 @@ public class LocalAssembler extends PairWalker {
         contigsList.removeLast();
     }
 
-    private static void addTraversal( final Collection<Contig> contigsList, final Set<Traversal> traversalSet ) {
+    private static void addTraversal( final Collection<Contig> contigsList,
+                                      final Set<Traversal> traversalSet ) {
         final Traversal traversal = new Traversal(contigsList);
         if ( !traversalSet.contains(traversal.rc()) ) {
             traversalSet.add(traversal);
@@ -682,8 +737,91 @@ public class LocalAssembler extends PairWalker {
         }
     }
 
-    private static void writeDOT( final List<ContigImpl> contigs,
-                                  final String fileName ) {
+    private static void clearTransitPairCount(
+            final Map<Contig, List<TransitPairCount>> contigTransitsMap,
+            final Contig predecessor,
+            final Contig contig,
+            final Contig successor ) {
+        final List<TransitPairCount> transits = contigTransitsMap.get(contig);
+        for ( final TransitPairCount tpc : transits ) {
+            if ( tpc.getContig1() == predecessor && tpc.getContig2() == successor ) {
+                tpc.resetCount();
+                break;
+            }
+        }
+        final List<TransitPairCount> revTransits = contigTransitsMap.get(contig.rc());
+        for ( final TransitPairCount tpc : revTransits ) {
+            if ( tpc.getContig1() == successor.rc() && tpc.getContig2() == predecessor.rc() ) {
+                tpc.resetCount();
+                break;
+            }
+        }
+    }
+
+    private static List<List<Contig>> findLongestPaths( final List<Contig> toMatch,
+                                                        final List<Path> readPaths ) {
+        final List<List<Contig>> results = new ArrayList<>();
+        for ( final Path path : readPaths ) {
+            testPath(path, toMatch, results);
+            testPath(path.rc(), toMatch, results);
+        }
+        return results;
+    }
+
+    private static void testPath( final Path path,
+                                  final List<Contig> toMatch,
+                                  final List<List<Contig>> results ) {
+        final List<PathPart> pathParts = path.getParts();
+        final int nPathParts = pathParts.size();
+        final List<Contig> pathContigs = new ArrayList<>(nPathParts);
+        pathParts.forEach(pp -> pathContigs.add(pp.getContig()));
+        final int matchIdx = Collections.indexOfSubList(pathContigs, toMatch);
+        if ( matchIdx != -1 ) {
+            final int suffixIdx = matchIdx + toMatch.size();
+            if ( suffixIdx < nPathParts ) {
+                resolveResult(grabParts(pathContigs, suffixIdx), results);
+            }
+        }
+    }
+
+    private static List<Contig> grabParts( final List<Contig> pathContigs, final int suffixIdx ) {
+        final int nPathContigs = pathContigs.size();
+        Contig prev = pathContigs.get(suffixIdx - 1);
+        final List<Contig> result = new ArrayList<>(nPathContigs - suffixIdx);
+        for ( int idx = suffixIdx; idx != nPathContigs; ++idx ) {
+            final Contig tig = pathContigs.get(idx);
+            if ( tig == null || !prev.getSuccessors().contains(tig) ) break;
+            result.add(tig);
+            prev = tig;
+        }
+        return result;
+    }
+
+    private static void resolveResult( final List<Contig> result,
+                                       final List<List<Contig>> results ) {
+        final int nResults = results.size();
+        for ( int idx = 0; idx != nResults; ++idx ) {
+            final List<Contig> test = results.get(idx);
+            if ( isPrefix(result, test) ) return;
+            if ( isPrefix(test, result) ) {
+                results.set(idx, result);
+                return;
+            }
+        }
+        results.add(result);
+    }
+
+    private static boolean isPrefix( final List<Contig> list1, final List<Contig> list2 ) {
+        final int list1Size = list1.size();
+        final int list2Size = list2.size();
+        if ( list1Size > list2Size ) return false;
+        for ( int idx = 0; idx != list1Size; ++idx ) {
+            if ( list1.get(idx) != list2.get(idx) ) return false;
+        }
+        return true;
+    }
+
+    private static void writeDOT( final List<ContigImpl> contigs, final String fileName ) {
         try ( final BufferedWriter writer = new BufferedWriter(new FileWriter(fileName)) ) {
             writer.write("digraph {\n");
             for ( final Contig contig : contigs ) {
@@ -708,7 +846,8 @@ public class LocalAssembler extends PairWalker {
     }
 
     private static BufferedWriter makeGZFile( final String fileName ) throws IOException {
-        return new BufferedWriter(new OutputStreamWriter(new GZIPOutputStream(BucketUtils.createFile(fileName))));
+        final GZIPOutputStream gzOS = new GZIPOutputStream(BucketUtils.createFile(fileName));
+        return new BufferedWriter(new OutputStreamWriter(gzOS));
     }
 
     private static void writeContigs( final List<ContigImpl> contigs, final String fileName ) {
@@ -745,14 +884,15 @@ public class LocalAssembler extends PairWalker {
                 }
 
                 final String contigName = contig.toString();
-                final String component = (contig.isCyclic() ? "(C)\t" : "\t") + contig.getComponentId();
-                writer.write(
-                       contigName + component + predecessorDescription + successorDescription + "\t" +
-                            contig.getMaxObservations() + "\t" +
-                            contig.getFirstKmer().getNObservations() + "\t" +
-                            contig.getLastKmer().getNObservations() + "\t" +
-                            contig.size() + "\t" +
-                            contig.getSequence() + "\n");
+                final String component =
+                        (contig.isCyclic() ? "(C)\t" : "\t") + contig.getComponentId();
+                writer.write(contigName + component + predecessorDescription +
+                        successorDescription + "\t" +
+                        contig.getMaxObservations() + "\t" +
+                        contig.getFirstKmer().getNObservations() + "\t" +
+                        contig.getLastKmer().getNObservations() + "\t" +
+                        contig.size() + "\t" +
+                        contig.getSequence() + "\n");
             }
         } catch ( final IOException ioe ) {
             throw new GATKException("Failed to write contigs file.", ioe);
@@ -793,7 +933,8 @@ public class LocalAssembler extends PairWalker {
         }
     }
 
-    private static void writeTraversals( final Collection<Traversal> traversals, final String fileName ) {
+    private static void writeTraversals( final Collection<Traversal> traversals,
+                                         final String fileName ) {
         try ( final BufferedWriter writer = makeGZFile(fileName) ) {
             int traversalNo = 0;
             for ( final Traversal traversal : traversals ) {
@@ -827,7 +968,9 @@ public class LocalAssembler extends PairWalker {
         public int getInitialCall() { return (int)(kVal >> (KSIZE*2 - 2)) & 3; }
         public int getFinalCall() { return (int)kVal & 3; }
 
-        public long getPredecessorVal( final int call ) { return (kVal >> 2) | ((long)call << (2 * (KSIZE - 1))); }
+        public long getPredecessorVal( final int call ) {
+            return (kVal >> 2) | ((long)call << (2 * (KSIZE - 1)));
+        }
         public long getSuccessorVal( final int call ) { return ((kVal << 2) & KMASK) | call; }
 
         public static boolean isCanonical( final long val ) {
@@ -858,12 +1001,14 @@ public class LocalAssembler extends PairWalker {
         public abstract KmerAdjacency getSolePredecessor();
         public abstract int getPredecessorMask();
         public abstract int getPredecessorCount();
-        public abstract void removePredecessor( final int callToRemove, final KmerSet<KmerAdjacency> kmerAdjacencySet );
+        public abstract void removePredecessor( final int callToRemove,
+                                                final KmerSet<KmerAdjacency> kmerAdjacencySet );
 
         public abstract KmerAdjacency getSoleSuccessor();
         public abstract int getSuccessorMask();
         public abstract int getSuccessorCount();
-        public abstract void removeSuccessor( final int callToRemove, final KmerSet<KmerAdjacency> kmerAdjacencySet );
+        public abstract void removeSuccessor( final int callToRemove,
+                                              final KmerSet<KmerAdjacency> kmerAdjacencySet );
 
         public abstract Contig getContig();
         public abstract int getContigOffset();
@@ -877,7 +1022,9 @@ public class LocalAssembler extends PairWalker {
             observe(predecessor, successor, 1);
         }
 
-        public abstract void observe( final KmerAdjacency predecessor, final KmerAdjacency successor, final int count );
+        public abstract void observe( final KmerAdjacency predecessor,
+                                      final KmerAdjacency successor,
+                                      final int count );
 
         @Override public String toString() {
             final StringBuilder sb = new StringBuilder(KSIZE);
@@ -975,7 +1122,8 @@ public class LocalAssembler extends PairWalker {
             BYTEWISE_REVERSE_COMPLEMENT = new long[256];
             for ( int bIn = 0; bIn != 256; ++bIn ) {
                 BYTEWISE_REVERSE_COMPLEMENT[bIn] =
-                        ~(((bIn & 3) << 6) | (((bIn >> 2) & 3) << 4) | (((bIn >> 4) & 3) << 2) | ((bIn >> 6) & 3)) & 0xffL;
+                        ~(((bIn & 3) << 6) | (((bIn >> 2) & 3) << 4) |
+                                (((bIn >> 4) & 3) << 2) | ((bIn >> 6) & 3)) & 0xffL;
             }
         }
 
@@ -992,19 +1140,21 @@ public class LocalAssembler extends PairWalker {
             return result >>> (Long.SIZE - 2*KSIZE);
         }
 
-        public static KmerAdjacency find( final long kVal, final KmerSet<KmerAdjacency> kmerAdjacencySet ) {
+        public static KmerAdjacency find( final long kVal,
+                                          final KmerSet<KmerAdjacency> kmerAdjacencySet ) {
             if ( isCanonical(kVal) ) return kmerAdjacencySet.find(new Kmer(kVal & KMASK));
             final KmerAdjacency result = kmerAdjacencySet.find(new Kmer(reverseComplement(kVal)));
             return result == null ? null : result.rc();
         }
 
-        public static KmerAdjacency findOrAdd( final long kVal, final KmerSet<KmerAdjacency> kmerAdjacencySet ) {
+        public static KmerAdjacency findOrAdd( final long kVal,
+                                               final KmerSet<KmerAdjacency> kmerAdjacencySet ) {
             if ( isCanonical(kVal) ) {
-                return kmerAdjacencySet.findOrAdd(new Kmer(kVal & KMASK),
-                                                  kmer -> new KmerAdjacencyImpl(((Kmer)kmer).getKVal()));
+                return kmerAdjacencySet.findOrAdd(new Kmer(kVal & KMASK), kmer ->
+                        new KmerAdjacencyImpl(((Kmer)kmer).getKVal()));
             }
-            return kmerAdjacencySet.findOrAdd(new Kmer(reverseComplement(kVal)),
-                                              kmer -> new KmerAdjacencyImpl(((Kmer)kmer).getKVal())).rc();
+            return kmerAdjacencySet.findOrAdd(new Kmer(reverseComplement(kVal)), kmer ->
+                    new KmerAdjacencyImpl(((Kmer)kmer).getKVal())).rc();
         }
     }
 
@@ -1026,7 +1176,8 @@ public class LocalAssembler extends PairWalker {
         @Override public int getPredecessorMask() { return NIBREV[rc.getSuccessorMask()]; }
         @Override public int getPredecessorCount() { return rc.getSuccessorCount(); }
         @Override
-        public void removePredecessor( final int callToRemove, final KmerSet<KmerAdjacency> kmerAdjacencySet ) {
+        public void removePredecessor( final int callToRemove,
+                                       final KmerSet<KmerAdjacency> kmerAdjacencySet ) {
             rc.removeSuccessor(3 - callToRemove, kmerAdjacencySet);
         }
 
@@ -1037,7 +1188,8 @@ public class LocalAssembler extends PairWalker {
         @Override public int getSuccessorMask() { return NIBREV[rc.getPredecessorMask()]; }
         @Override public int getSuccessorCount() { return rc.getPredecessorCount(); }
         @Override
-        public void removeSuccessor( final int callToRemove, final KmerSet<KmerAdjacency> kmerAdjacencySet ) {
+        public void removeSuccessor( final int callToRemove,
+                                     final KmerSet<KmerAdjacency> kmerAdjacencySet ) {
             rc.removePredecessor(3 - callToRemove, kmerAdjacencySet);
         }
 
@@ -1058,8 +1210,12 @@ public class LocalAssembler extends PairWalker {
         @Override public KmerAdjacency rc() { return rc; }
         @Override public KmerAdjacencyImpl canonical() { return rc; }
 
-        @Override public void observe( final KmerAdjacency predecessor, final KmerAdjacency successor, final int count ) {
-            rc.observe(successor == null ? null : successor.rc(), predecessor == null ? null : predecessor.rc(), count);
+        @Override public void observe( final KmerAdjacency predecessor,
+                                       final KmerAdjacency successor,
+                                       final int count ) {
+            rc.observe(successor == null ? null : successor.rc(),
+                    predecessor == null ? null : predecessor.rc(),
+                    count);
         }
     }
 
@@ -1086,7 +1242,8 @@ public class LocalAssembler extends PairWalker {
         @Override public int getPredecessorMask() { return predecessorMask; }
         @Override public int getPredecessorCount() { return COUNT_FOR_MASK[predecessorMask]; }
         @Override
-        public void removePredecessor( final int callToRemove, final KmerSet<KmerAdjacency> kmerAdjacencySet ) {
+        public void removePredecessor( final int callToRemove,
+                                       final KmerSet<KmerAdjacency> kmerAdjacencySet ) {
             predecessorMask &= ~(1 << callToRemove);
             solePredecessor = null;
             if ( getPredecessorCount() == 1 ) {
@@ -1103,7 +1260,8 @@ public class LocalAssembler extends PairWalker {
         @Override public int getSuccessorMask() { return successorMask; }
         @Override public int getSuccessorCount() { return COUNT_FOR_MASK[successorMask]; }
         @Override
-        public void removeSuccessor( final int callToRemove, final KmerSet<KmerAdjacency> kmerAdjacencySet ) {
+        public void removeSuccessor( final int callToRemove,
+                                     final KmerSet<KmerAdjacency> kmerAdjacencySet ) {
             successorMask &= ~(1 << callToRemove);
             soleSuccessor = null;
             if ( getSuccessorCount() == 1 ) {
@@ -1176,7 +1334,9 @@ public class LocalAssembler extends PairWalker {
         private final Contig contig;
         private final ContigOrientation contigOrientation;
 
-        public ContigEndKmer( final long kVal, final Contig contig, final ContigOrientation contigEnd ) {
+        public ContigEndKmer( final long kVal,
+                              final Contig contig,
+                              final ContigOrientation contigEnd ) {
             super(kVal);
             this.contig = contig;
             this.contigOrientation = contigEnd;
@@ -1267,7 +1427,8 @@ public class LocalAssembler extends PairWalker {
             final CharSequence successorSequence = successor.getSequence();
             sb.append(successorSequence.subSequence(Kmer.KSIZE - 1, successorSequence.length()));
             this.sequence = sb.toString();
-            this.maxObservations = Math.max(predecessor.getMaxObservations(), successor.getMaxObservations());
+            this.maxObservations =
+                    Math.max(predecessor.getMaxObservations(), successor.getMaxObservations());
             this.firstKmer = predecessor.getFirstKmer();
             this.lastKmer = successor.getLastKmer();
             this.predecessors = new ArrayList<>(predecessor.getPredecessors().size());
@@ -1405,7 +1566,9 @@ public class LocalAssembler extends PairWalker {
             this.contigList = contigList;
         }
 
-        @Override public Contig get( final int index ) { return contigList.get(reflectIndex(index)).rc(); }
+        @Override public Contig get( final int index ) {
+            return contigList.get(reflectIndex(index)).rc();
+        }
         @Override public int size() { return contigList.size(); }
         @Override public Contig set( final int index, final Contig contig ) {
             return contigList.set(reflectIndex(index), contig.rc()).rc();
@@ -1413,7 +1576,9 @@ public class LocalAssembler extends PairWalker {
         @Override public void add( final int index, final Contig contig ) {
             contigList.add(reflectIndex(index), contig.rc());
         }
-        @Override public Contig remove( final int index ) { return contigList.remove(reflectIndex(index)).rc(); }
+        @Override public Contig remove( final int index ) {
+            return contigList.remove(reflectIndex(index)).rc();
+        }
 
         private int reflectIndex( final int index ) { return size() - 1 - index; }
     }
@@ -1448,7 +1613,9 @@ public class LocalAssembler extends PairWalker {
         @Override public int getLength() { return sequence.length() - Kmer.KSIZE + 1; }
         @Override public PathPart rc() { return new PathPartGap(new SequenceRC(sequence)); }
         @Override public char getFirstCall() { return sequence.charAt(Kmer.KSIZE - 1); }
-        @Override public char getLastCall() { return sequence.charAt(sequence.length() - Kmer.KSIZE + 1); }
+        @Override public char getLastCall() {
+            return sequence.charAt(sequence.length() - Kmer.KSIZE + 1);
+        }
     }
 
     public static final class PathPartContig implements PathPart {
@@ -1456,7 +1623,9 @@ public class LocalAssembler extends PairWalker {
         private final int start;
         private int stop;
 
-        public PathPartContig( final Contig contig, final int start ) { this(contig, start, start+1); }
+        public PathPartContig( final Contig contig, final int start ) {
+            this(contig, start, start+1);
+        }
         public PathPartContig( final Contig contig, final int start, final int stop ) {
             this.contig = contig;
             this.start = start;
@@ -1474,7 +1643,9 @@ public class LocalAssembler extends PairWalker {
             final int revBase = contig.size() - Kmer.KSIZE + 1;
             return new PathPartContig(contig.rc(), revBase - stop, revBase - start);
         }
-        @Override public char getFirstCall() { return getContig().getSequence().charAt(start + Kmer.KSIZE - 1); }
+        @Override public char getFirstCall() {
+            return getContig().getSequence().charAt(start + Kmer.KSIZE - 1);
+        }
         @Override public char getLastCall() { return getContig().getSequence().charAt(stop - 1); }
     }
 
@@ -1559,7 +1730,8 @@ public class LocalAssembler extends PairWalker {
                                         final Contig prevPartContig = prevPart.getContig();
                                         final int prevPartStart = prevPart.getStart();
                                         final int prevPartStop = prevPart.getStop();
-                                        final int prevPartMaxStop = prevPartContig.size() - Kmer.KSIZE + 1;
+                                        final int prevPartMaxStop =
+                                                prevPartContig.size() - Kmer.KSIZE + 1;
                                         final int newStop = kmerContigOffset + 1;
                                         if ( prevPartContig == kmer.getContig() ) {
                                             if ( kmerContigOffset - prevPartStop == gapLen ) {
