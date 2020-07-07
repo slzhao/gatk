@@ -640,7 +640,7 @@ public class LocalAssembler extends PairWalker {
                     done = true;
                 }
                 if ( !done ) { // if there were no predecessors or successors, it stands alone
-                    traversalSet.add(new Traversal(Collections.singletonList(contig)));
+                    addTraversal(new Traversal(Collections.singletonList(contig)), traversalSet);
                 }
             }
         }
@@ -660,7 +660,8 @@ public class LocalAssembler extends PairWalker {
                     for ( final Traversal revTraversal : revTraversalSet ) {
                         final Traversal revTraversalRC = revTraversal.rc();
                         for ( final Traversal fwdTraversal : fwdTraversalSet ) {
-                            traversalSet.add(Traversal.combine(revTraversalRC, fwdTraversal));
+                            final Traversal combo = Traversal.combine(revTraversalRC, fwdTraversal);
+                            addTraversal(combo, traversalSet);
                         }
                     }
                 }
@@ -698,11 +699,11 @@ public class LocalAssembler extends PairWalker {
                         contigsList.addLast(contig);
                         contigsList.addLast(successor);
                         if ( longestPaths.isEmpty() ) {
-                            addTraversal(contigsList, traversalSet);
+                            addTraversal(new Traversal(contigsList), traversalSet);
                         } else {
                             for ( final List<Contig> suffix : longestPaths ) {
                                 contigsList.addAll(suffix);
-                                addTraversal(contigsList, traversalSet);
+                                addTraversal(new Traversal(contigsList), traversalSet);
                                 Contig prev = contig;
                                 Contig cur = successor;
                                 for ( final Contig next : suffix ) {
@@ -720,15 +721,14 @@ public class LocalAssembler extends PairWalker {
         }
         if ( !done ) {
             contigsList.addLast(contig);
-            addTraversal(contigsList, traversalSet);
+            addTraversal(new Traversal(contigsList), traversalSet);
             contigsList.removeLast();
         }
         contigsList.removeLast();
     }
 
-    private static void addTraversal( final Collection<Contig> contigsList,
+    private static void addTraversal( final Traversal traversal,
                                       final Set<Traversal> traversalSet ) {
-        final Traversal traversal = new Traversal(contigsList);
         if ( !traversalSet.contains(traversal.rc()) ) {
             traversalSet.add(traversal);
             if ( traversalSet.size() >= TOO_MANY_TRAVERSALS ) {
@@ -736,7 +736,6 @@ public class LocalAssembler extends PairWalker {
             }
         }
     }
-
     private static void clearTransitPairCount(
             final Map<Contig, List<TransitPairCount>> contigTransitsMap,
             final Contig predecessor,
