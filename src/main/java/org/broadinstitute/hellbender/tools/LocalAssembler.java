@@ -179,11 +179,15 @@ public class LocalAssembler extends PairWalker {
             if ( kmerAdjacency.getContig() == null ) {
                 ContigImpl contig = null;
                 final KmerAdjacency predecessor = kmerAdjacency.getSolePredecessor();
-                if ( predecessor == null || predecessor.getSuccessorCount() > 1 ) {
+                if ( predecessor == null ||
+                        predecessor.getSuccessorCount() > 1 ||
+                        predecessor == kmerAdjacency.rc() ) {
                     contig = new ContigImpl(kmerAdjacency);
                 } else {
                     final KmerAdjacency successor = kmerAdjacency.getSoleSuccessor();
-                    if ( successor == null || successor.getPredecessorCount() > 1 ) {
+                    if ( successor == null ||
+                            successor.getPredecessorCount() > 1 ||
+                            successor == kmerAdjacency.rc() ) {
                         contig = new ContigImpl(kmerAdjacency.rc());
                     }
                 }
@@ -211,13 +215,10 @@ public class LocalAssembler extends PairWalker {
             final KmerAdjacency fwdKmer = contig.getFirstKmer();
             final KmerAdjacency revKmer = contig.getLastKmer().rc();
             if ( fwdKmer == revKmer ) {
-                contigEnds.findOrAdd(fwdKmer, kmer ->
-                        new ContigEndKmer(((Kmer)kmer).getKVal(), contig, ContigOrientation.BOTH));
+                contigEnds.add(new ContigEndKmer(fwdKmer.getKVal(), contig, ContigOrientation.BOTH));
             } else {
-                contigEnds.findOrAdd(fwdKmer, kmer ->
-                        new ContigEndKmer(((Kmer)kmer).getKVal(), contig, ContigOrientation.FWD));
-                contigEnds.findOrAdd(revKmer, kmer ->
-                        new ContigEndKmer(((Kmer)kmer).getKVal(), contig, ContigOrientation.REV));
+                contigEnds.add(new ContigEndKmer(fwdKmer.getKVal(), contig, ContigOrientation.FWD));
+                contigEnds.add(new ContigEndKmer(revKmer.getKVal(), contig, ContigOrientation.REV));
             }
         }
 
@@ -393,8 +394,10 @@ public class LocalAssembler extends PairWalker {
             if ( kmer == null ) {
                 throw new GATKException("contig does not have a flat pipeline of kmers");
             }
+            kmer.setContig(null, 0); // erase the old info first or we'll throw
             kmer.setContig(contig, offset++);
         }
+        lastKmer.setContig(null, 0);
         lastKmer.setContig(contig, offset);
         if ( offset + Kmer.KSIZE != contig.size() ) {
             throw new GATKException("kmer chain length does not equal contig size");
@@ -1276,6 +1279,9 @@ public class LocalAssembler extends PairWalker {
         @Override public Contig getContig() { return contig; }
         @Override public int getContigOffset() { return contigOffset; }
         @Override public void setContig( final Contig contig, final int contigOffset ) {
+            if ( contig != null && this.contig != null ) {
+                throw new GATKException("Internal error: overwriting kmer contig.");
+            }
             this.contig = contig;
             this.contigOffset = contigOffset;
         }
