@@ -1361,6 +1361,7 @@ public class LocalAssembler extends PairWalker {
         List<Contig> getSuccessors();
         int getComponentId();
         int size();
+        default int getNKmers() { return size() - Kmer.KSIZE + 1; }
         Contig rc();
         boolean isCyclic();
         void setCyclic( final boolean cyclic );
@@ -1715,12 +1716,18 @@ public class LocalAssembler extends PairWalker {
                             parts.add(currentPathPart);
                         } else if ( contig == currentPathPart.getContig() ) {
                             // our lookup is on the current path part's contig -- extend it
-                            if ( kmer.getContigOffset() == currentPathPart.getStop() ) {
+                            final int kmerOffset = kmer.getContigOffset();
+                            final int curStop = currentPathPart.getStop();
+                            if ( kmerOffset == curStop ) {
                                 currentPathPart.extend(call);
+                            } else if ( kmerOffset == 0 && contig.getNKmers() == curStop ) {
+                                // cycle onto same contig
+                                currentPathPart = new PathPartContig(contig, 0);
+                                parts.add(currentPathPart);
                             } else {
                                 // weird:  kmer is non-contiguous.  start a new path part after a zero-length gap
                                 parts.add(zeroLengthGap(currentPathPart));
-                                currentPathPart = new PathPartContig(contig, kmer.getContigOffset());
+                                currentPathPart = new PathPartContig(contig, kmerOffset);
                                 parts.add(currentPathPart);
                             }
                         } else {
