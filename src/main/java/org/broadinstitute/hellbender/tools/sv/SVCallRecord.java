@@ -73,9 +73,12 @@ public class SVCallRecord implements Feature {
         final List<String> algorithms = Collections.singletonList(GATKSVVCFConstants.DEPTH_ALGORITHM);
 
         //TODO : use new vcfs to get actual allele
-        final int copyNumber = Integer.valueOf((String)variant.getGenotypes().get(0).getExtendedAttribute(GermlineCNVSegmentVariantComposer.CN));
-        if (copyNumber == 2) { return null; }
-        final boolean isDel = copyNumber < 2;
+        final Genotype g = variant.getGenotypes().get(0);
+        final int copyNumber = Integer.valueOf((String)g.getExtendedAttribute(GermlineCNVSegmentVariantComposer.CN));
+        final int ploidy = g.getPloidy();
+        //don't cluster homRef events
+        if (copyNumber == ploidy) { return null; }
+        final boolean isDel = copyNumber - ploidy < 0;
         final boolean startStrand = isDel ? true : false;
         final boolean endStrand = isDel ? false : true;
         final StructuralVariantType type = isDel ? StructuralVariantType.DEL : StructuralVariantType.DUP;

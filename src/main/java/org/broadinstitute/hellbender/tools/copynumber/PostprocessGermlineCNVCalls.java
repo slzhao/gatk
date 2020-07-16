@@ -131,6 +131,9 @@ public final class PostprocessGermlineCNVCalls extends GATKTool {
     public static final String ALLOSOMAL_CONTIG_LONG_NAME = "allosomal-contig";
     public static final String COMBINED_INTERVALS_LONG_NAME = "combined-intervals-vcf";
     public static final String CLUSTERED_FILE_LONG_NAME = "clustered-breakpoints";
+    public static final String DUPLICATION_QS_THRESHOLD_LONG_NAME = "duplication-qs-threshold";
+    public static final String HET_DEL_QS_THRESHOLD_LONG_NAME = "het-deletion-qs-threshold";
+    public static final String HOM_DEL_QS_THRESHOLD_LONG_NAME = "hom-deletion-qs-threshold";
 
     @Argument(
             doc = "List of paths to GermlineCNVCaller call directories.",

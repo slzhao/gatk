@@ -7,6 +7,7 @@ import htsjdk.variant.variantcontext.writer.VariantContextWriter;
 import htsjdk.variant.vcf.VCFConstants;
 import htsjdk.variant.vcf.VCFHeader;
 import htsjdk.variant.vcf.VCFHeaderLine;
+import htsjdk.variant.vcf.VCFStandardHeaderLines;
 import org.apache.commons.lang3.tuple.MutablePair;
 import org.apache.commons.lang3.tuple.Pair;
 import org.broadinstitute.barclay.argparser.Argument;
@@ -29,6 +30,7 @@ import org.broadinstitute.hellbender.tools.sv.SVDepthOnlyCallDefragmenter;
 import org.broadinstitute.hellbender.utils.*;
 import org.broadinstitute.hellbender.utils.genotyper.IndexedSampleList;
 import org.broadinstitute.hellbender.utils.variant.GATKVCFConstants;
+import org.broadinstitute.hellbender.utils.variant.GATKVCFHeaderLines;
 import org.broadinstitute.hellbender.utils.variant.HomoSapiensConstants;
 import shaded.cloud_nio.com.google.errorprone.annotations.Var;
 
@@ -111,6 +113,9 @@ public class JointCNVSegmentation extends MultiVariantWalkerGroupedOnStart {
         headerLines.addAll(getDefaultToolVCFHeaderLines());
         headerLines.add(GATKSVVCFHeaderLines.getInfoLine(GATKSVVCFConstants.SVLEN));
         headerLines.add(GATKSVVCFHeaderLines.getInfoLine(GATKSVVCFConstants.SVTYPE));
+        headerLines.add(VCFStandardHeaderLines.getInfoLine(VCFConstants.ALLELE_FREQUENCY_KEY));
+        headerLines.add(VCFStandardHeaderLines.getInfoLine(VCFConstants.ALLELE_COUNT_KEY));
+        headerLines.add(VCFStandardHeaderLines.getInfoLine(VCFConstants.ALLELE_NUMBER_KEY));
 
         VariantContextWriter writer = createVCFWriter(outputFile);
 
@@ -200,7 +205,7 @@ public class JointCNVSegmentation extends MultiVariantWalkerGroupedOnStart {
      * @param overlappingVCs
      * @return
      */
-    private List<VariantContext> resolveVariantContexts(List<VariantContext> overlappingVCs) {
+    private List<VariantContext> resolveVariantContexts(final List<VariantContext> overlappingVCs) {
         Utils.nonNull(overlappingVCs);
         final List<VariantContext> resolvedVCs = new ArrayList<>();
         final Iterator<VariantContext> it = overlappingVCs.iterator();
@@ -230,14 +235,19 @@ public class JointCNVSegmentation extends MultiVariantWalkerGroupedOnStart {
 
     /**
      *
-     * @param vc
+     * @param vc VariantContext with just variant samples
      * @param sampleCopyNumbers may be modified to remove terminated variants
-     * @return
+     * @return new VariantContext with AC and AF
      */
     private VariantContext updateGenotypes(final VariantContext vc, final Map<String, MutablePair<Integer, Integer>> sampleCopyNumbers) {
         final VariantContextBuilder builder = new VariantContextBuilder(vc);
         final List<Genotype> newGenotypes = new ArrayList<>();
+        int vacEstimate = 0;
+        //final int alleleNumber = vc.getGenotypes().stream().mapToInt(Genotype::getPloidy).sum();
+        final int alleleNumber = samples.size()*2;
         for (final String sample : samples) {
+            vacEstimate = vc.getGenotypes().size();
+            //"square off" the genotype matrix
             if (!sampleCopyNumbers.containsKey(sample) && !vc.hasGenotype(sample)) {
                 final GenotypeBuilder genotypeBuilder = new GenotypeBuilder(sample);
                 genotypeBuilder.alleles(Lists.newArrayList(Allele.REF_N, Allele.REF_N));
@@ -250,6 +260,7 @@ public class JointCNVSegmentation extends MultiVariantWalkerGroupedOnStart {
                     //only for CN=1 can we be sure there's no ref allele
                     if (copyNumber == 0) {
                         genotypeBuilder.alleles(Arrays.asList(GermlineCNVVariantComposer.DEL_ALLELE, GermlineCNVVariantComposer.DEL_ALLELE));
+                        vacEstimate++; //we assume each event is a het, but here we know it's not
                     } else {
                         genotypeBuilder.alleles(vc.getGenotype(sample).getAlleles()); //will get an extra ref when converted to diploid
                     }
@@ -270,7 +281,17 @@ public class JointCNVSegmentation extends MultiVariantWalkerGroupedOnStart {
                 newGenotypes.add(genotypeBuilder.make());
             }
         }
-        return builder.genotypes(newGenotypes).make();
+        /*builder.genotypes(newGenotypes);
+        if (alleleNumber > 0) {
+            builder.attribute(VCFConstants.ALLELE_COUNT_KEY, vacEstimate)
+                    .attribute(VCFConstants.ALLELE_FREQUENCY_KEY, 1.0*vacEstimate/alleleNumber)  //TODO: this is only accurate for autosomes -- elegant solution would take in cohort ploidy calls
+                    .attribute(VCFConstants.ALLELE_NUMBER_KEY, alleleNumber);
+        }
+        return builder.make(); */
+       /*return builder.genotypes(newGenotypes).attribute(VCFConstants.ALLELE_COUNT_KEY, vacEstimate)
+                    .attribute(VCFConstants.ALLELE_FREQUENCY_KEY, 1.0*vacEstimate/alleleNumber)  //TODO: this is only accurate for autosomes -- elegant solution would take in cohort ploidy calls
+                    .attribute(VCFConstants.ALLELE_NUMBER_KEY, alleleNumber).make();*/
+       return builder.genotypes(newGenotypes).make();
     }
 
     public VariantContext buildVariantContext(final SVCallRecordWithEvidence call) {
