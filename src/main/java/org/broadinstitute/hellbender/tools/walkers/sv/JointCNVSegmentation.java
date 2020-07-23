@@ -19,6 +19,7 @@ import org.broadinstitute.hellbender.engine.MultiVariantWalkerGroupedOnStart;
 import org.broadinstitute.hellbender.engine.ReadsContext;
 import org.broadinstitute.hellbender.engine.ReferenceContext;
 import org.broadinstitute.hellbender.exceptions.UserException;
+import org.broadinstitute.hellbender.tools.copynumber.PostprocessGermlineCNVCalls;
 import org.broadinstitute.hellbender.tools.copynumber.gcnv.GermlineCNVSegmentVariantComposer;
 import org.broadinstitute.hellbender.tools.copynumber.gcnv.GermlineCNVVariantComposer;
 import org.broadinstitute.hellbender.tools.spark.sv.utils.GATKSVVCFConstants;
@@ -72,6 +73,22 @@ public class JointCNVSegmentation extends MultiVariantWalkerGroupedOnStart {
             shortName=StandardArgumentDefinitions.OUTPUT_SHORT_NAME,
             doc="The combined output file", optional=false)
     private File outputFile;
+
+    @Argument(
+            doc = "Reference copy-number on autosomal intervals.",
+            fullName = PostprocessGermlineCNVCalls.AUTOSOMAL_REF_COPY_NUMBER_LONG_NAME,
+            minValue = 0,
+            optional = true
+    )
+    private int refAutosomalCopyNumber = 2;
+
+    @Argument(
+            doc = "Contigs to treat as allosomal (i.e. choose their reference copy-number allele according to " +
+                    "the sample karyotype).",
+            fullName = PostprocessGermlineCNVCalls.ALLOSOMAL_CONTIG_LONG_NAME,
+            optional = true
+    )
+    private List<String> allosomalContigList;
 
     @Override
     public boolean requiresReference() {
@@ -243,15 +260,19 @@ public class JointCNVSegmentation extends MultiVariantWalkerGroupedOnStart {
         final VariantContextBuilder builder = new VariantContextBuilder(vc);
         final List<Genotype> newGenotypes = new ArrayList<>();
         int vacEstimate = 0;
-        //final int alleleNumber = vc.getGenotypes().stream().mapToInt(Genotype::getPloidy).sum();
-        final int alleleNumber = samples.size()*2;
+        final int alleleNumber;
+        if (allosomalContigList.contains(vc.getContig())) {
+            alleleNumber = vc.getGenotypes().stream().mapToInt(Genotype::getPloidy).sum();  //this is the most elegant solution for AC/AF/AN on allosomes
+        } else{
+            alleleNumber = samples.size() * refAutosomalCopyNumber;
+        }
         for (final String sample : samples) {
             vacEstimate = vc.getGenotypes().size();
             //"square off" the genotype matrix
             if (!sampleCopyNumbers.containsKey(sample) && !vc.hasGenotype(sample)) {
                 final GenotypeBuilder genotypeBuilder = new GenotypeBuilder(sample);
                 genotypeBuilder.alleles(Lists.newArrayList(Allele.REF_N, Allele.REF_N));
-                genotypeBuilder.attribute(GermlineCNVSegmentVariantComposer.CN, HomoSapiensConstants.DEFAULT_PLOIDY);  //NOTE: ploidy 2 assumption
+                genotypeBuilder.attribute(GermlineCNVSegmentVariantComposer.CN, refAutosomalCopyNumber);
                 newGenotypes.add(genotypeBuilder.make());
             } else {
                 final GenotypeBuilder genotypeBuilder = new GenotypeBuilder(sample);
@@ -281,17 +302,13 @@ public class JointCNVSegmentation extends MultiVariantWalkerGroupedOnStart {
                 newGenotypes.add(genotypeBuilder.make());
             }
         }
-        /*builder.genotypes(newGenotypes);
+        builder.genotypes(newGenotypes);
         if (alleleNumber > 0) {
             builder.attribute(VCFConstants.ALLELE_COUNT_KEY, vacEstimate)
-                    .attribute(VCFConstants.ALLELE_FREQUENCY_KEY, 1.0*vacEstimate/alleleNumber)  //TODO: this is only accurate for autosomes -- elegant solution would take in cohort ploidy calls
+                    .attribute(VCFConstants.ALLELE_FREQUENCY_KEY, ((float)vacEstimate)/alleleNumber)  //TODO: output precision here is much higher than 1.0*vac/AN
                     .attribute(VCFConstants.ALLELE_NUMBER_KEY, alleleNumber);
         }
-        return builder.make(); */
-       /*return builder.genotypes(newGenotypes).attribute(VCFConstants.ALLELE_COUNT_KEY, vacEstimate)
-                    .attribute(VCFConstants.ALLELE_FREQUENCY_KEY, 1.0*vacEstimate/alleleNumber)  //TODO: this is only accurate for autosomes -- elegant solution would take in cohort ploidy calls
-                    .attribute(VCFConstants.ALLELE_NUMBER_KEY, alleleNumber).make();*/
-       return builder.genotypes(newGenotypes).make();
+        return builder.make();
     }
 
     public VariantContext buildVariantContext(final SVCallRecordWithEvidence call) {

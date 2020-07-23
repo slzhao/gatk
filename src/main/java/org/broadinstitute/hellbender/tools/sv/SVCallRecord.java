@@ -75,7 +75,9 @@ public class SVCallRecord implements Feature {
         //TODO : use new vcfs to get actual allele
         final Genotype g = variant.getGenotypes().get(0);
         final int copyNumber = Integer.valueOf((String)g.getExtendedAttribute(GermlineCNVSegmentVariantComposer.CN));
-        final int ploidy = g.getPloidy();
+        //TODO: put this back in after we fix Postprocess genotypes
+        //final int ploidy = g.getPloidy();
+        final int ploidy = 2;
         //don't cluster homRef events
         if (copyNumber == ploidy) { return null; }
         final boolean isDel = copyNumber - ploidy < 0;

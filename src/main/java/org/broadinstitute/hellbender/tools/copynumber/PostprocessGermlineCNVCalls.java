@@ -134,6 +134,9 @@ public final class PostprocessGermlineCNVCalls extends GATKTool {
     public static final String DUPLICATION_QS_THRESHOLD_LONG_NAME = "duplication-qs-threshold";
     public static final String HET_DEL_QS_THRESHOLD_LONG_NAME = "het-deletion-qs-threshold";
     public static final String HOM_DEL_QS_THRESHOLD_LONG_NAME = "hom-deletion-qs-threshold";
+    public static final String SITE_FREQUENCY_THRESHOLD_LONG_NAME = "site-frequency-threshold";
+    public static final String SAMPLE_FILTERED_CALL_COUNT_THRESHOLD = "sample-filtered-call-count-threshold";
+    public static final String SAMPLE_UNFILTERED_CALL_COUNT_THRESHOLD = "sample-unfiltered-call-count-threshold";
 
     @Argument(
             doc = "List of paths to GermlineCNVCaller call directories.",
@@ -208,6 +211,34 @@ public final class PostprocessGermlineCNVCalls extends GATKTool {
             fullName = OUTPUT_DENOISED_COPY_RATIOS_LONG_NAME
     )
     private File outputDenoisedCopyRatioFile;
+
+    @Argument(
+            doc = "Filter out heterozygous deletions with quality lower than this.",
+            fullName = HET_DEL_QS_THRESHOLD_LONG_NAME,
+            optional = true
+    )
+    private double hetDelQSThreshold = 0;
+
+    @Argument(
+            doc = "Filter out homozygous deletions with quality lower than this.",
+            fullName = HOM_DEL_QS_THRESHOLD_LONG_NAME,
+            optional = true
+    )
+    private double homDelQSThreshold = 0;
+
+    @Argument(
+            doc = "Filter out duplications with quality lower than this.",
+            fullName = DUPLICATION_QS_THRESHOLD_LONG_NAME,
+            optional = true
+    )
+    private double dupeQSThreshold = 0;
+
+    @Argument(
+            doc = "Filter out variants with site frequency higher than this.",
+            fullName = SITE_FREQUENCY_THRESHOLD_LONG_NAME,
+            optional = true
+    )
+    private double siteFrequencyThreshold = 0.00;
 
     /**
      * A list of {@link SimpleIntervalCollection} for each shard

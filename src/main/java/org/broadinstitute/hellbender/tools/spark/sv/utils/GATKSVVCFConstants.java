@@ -87,6 +87,8 @@ public final class GATKSVVCFConstants {
     // filter block
     public static final String ASSEMBLY_BASED_VARIANT_MQ_FILTER_KEY = "LOW_MQ";
     public static final String ASSEMBLY_BASED_VARIANT_ALN_LENGTH_FILTER_KEY = "SHORT_ALN";
+    public static final String LOW_QS_SCORE_FILTER_KEY = "LOW_QS";
+    public static final String FREQUENCY_FILTER_KEY = "FREQ";
 
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 

@@ -90,15 +90,23 @@ public class SVDepthOnlyCallDefragmenter extends LocatableClusterEngine<SVCallRe
         if (genomicToBinMap != null) {
             final GenomeLoc callStart = parser.createGenomeLoc(call.getContig(), call.getStart(), call.getStart());
             final GenomeLoc callEnd = parser.createGenomeLoc(call.getContig(), call.getEnd(), call.getEnd());
-            if (genomicToBinMap.ceilingEntry(callStart) == null) {
+            //first interval that is equal to or "greater than" the call start, such that the start of the bin should match the call start, with a little wiggle room
+            final Map.Entry<GenomeLoc, Integer> startBin = genomicToBinMap.ceilingEntry(callStart);
+            if (startBin == null) {
                 throw new UserException.BadInput("Call start " + callStart + " for  call " + call.prettyPrint() + " not found in model call intervals.");
             }
-            final int callStartIndex = genomicToBinMap.ceilingEntry(callStart).getValue();
-            if (genomicToBinMap.floorEntry(callEnd) == null) {
+            final int callStartIndex = startBin.getValue();
+            //last interval that is equal to or "less than" the call start, such that the end of the bin should match the call end
+            final Map.Entry<GenomeLoc, Integer> endBin = genomicToBinMap.floorEntry(callEnd);
+            if (endBin == null) {
                 throw new UserException.BadInput("Call end " + callEnd + " for call " + call.prettyPrint() + " not found in model call intervals.");
             }
-            final int callEndIndex = genomicToBinMap.floorEntry(callEnd).getValue();
+            final int callEndIndex = endBin.getValue();
             final int callBinLength = callEndIndex - callStartIndex + 1;
+            if (callBinLength <= 0) {
+                throw new UserException.BadInput("Copy number call at " + call.getContig() + ":" + call.getStart() + "-"
+                        + call.getEnd() + " does not align with supplied model calling intervals. Use the filtered intervals input from GermlineCNVCaller for this cohort/model.");
+            }
             final int paddedStartIndex = Math.max(callStartIndex - (int)Math.round(callBinLength * PADDING_FRACTION), 0);
             if (coverageIntervals.get(paddedStartIndex).getContig().equals(callStart.getContig())) {
                 paddedCallStart = coverageIntervals.get(paddedStartIndex).getStart();

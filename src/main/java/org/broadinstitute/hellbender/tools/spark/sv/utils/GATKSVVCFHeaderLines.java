@@ -1,6 +1,7 @@
 package org.broadinstitute.hellbender.tools.spark.sv.utils;
 
 import htsjdk.variant.vcf.*;
+import org.broadinstitute.hellbender.tools.copynumber.gcnv.GermlineCNVSegmentVariantComposer;
 import org.broadinstitute.hellbender.utils.Utils;
 import org.broadinstitute.hellbender.utils.variant.GATKVCFConstants;
 
@@ -262,6 +263,12 @@ public final class GATKSVVCFHeaderLines {
 
             addFilterLine(new VCFFilterHeaderLine(GATKSVVCFConstants.ASSEMBLY_BASED_VARIANT_ALN_LENGTH_FILTER_KEY,
                     "Assembly evidence based record that whose " + GATKSVVCFConstants.MAPPING_QUALITIES + " value is lower than user specified threshold"));
+
+            addFilterLine(new VCFFilterHeaderLine(GATKSVVCFConstants.LOW_QS_SCORE_FILTER_KEY,
+                    "Depth-only copy number record whose " + GermlineCNVSegmentVariantComposer.QS + " value is lower than user specified threshold"));
+
+            addFilterLine(new VCFFilterHeaderLine(GATKSVVCFConstants.FREQUENCY_FILTER_KEY,
+                    "Depth-only copy number record whose " + VCFConstants.ALLELE_FREQUENCY_KEY + " value is higher than user specified threshold"));
         }
     }
 }

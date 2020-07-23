@@ -3,19 +3,29 @@ package org.broadinstitute.hellbender.tools.copynumber.gcnv;
 import com.google.common.annotations.VisibleForTesting;
 import htsjdk.samtools.SAMSequenceDictionary;
 import htsjdk.samtools.reference.ReferenceSequenceFile;
+import htsjdk.tribble.AbstractFeatureReader;
+import htsjdk.tribble.FeatureReader;
+import htsjdk.tribble.TribbleException;
 import htsjdk.variant.variantcontext.*;
 import htsjdk.variant.variantcontext.writer.VariantContextWriter;
 import htsjdk.variant.vcf.*;
 import org.apache.commons.math3.util.FastMath;
-import org.apache.hadoop.yarn.webapp.hamlet.Hamlet;
+import org.broadinstitute.hellbender.exceptions.GATKException;
 import org.broadinstitute.hellbender.tools.copynumber.GermlineCNVCaller;
 import org.broadinstitute.hellbender.tools.copynumber.PostprocessGermlineCNVCalls;
 import org.broadinstitute.hellbender.tools.copynumber.formats.records.IntegerCopyNumberSegment;
+import org.broadinstitute.hellbender.tools.spark.sv.utils.GATKSVVCFConstants;
+import org.broadinstitute.hellbender.tools.spark.sv.utils.GATKSVVCFHeaderLines;
 import org.broadinstitute.hellbender.utils.Utils;
 import org.broadinstitute.hellbender.utils.reference.ReferenceUtils;
+import org.broadinstitute.hellbender.utils.variant.GATKVCFConstants;
+import org.broadinstitute.hellbender.utils.variant.GATKVCFHeaderLines;
 import org.broadinstitute.hellbender.utils.variant.GATKVariantContextUtils;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * Helper class for {@link PostprocessGermlineCNVCalls} for single-sample postprocessing of segmented
@@ -60,6 +70,12 @@ public final class GermlineCNVSegmentVariantComposer extends GermlineCNVVariantC
     private final IntegerCopyNumberState refAutosomalCopyNumberState;
     private final Set<String> allosomalContigSet;
     private final ReferenceSequenceFile reference;
+    private final int dupeQSThreshold;
+    private final int hetDelQSThreshold;
+    private final int homDelQSThreshold;
+    private final int siteFreqThreshold;
+    private final File clusteredCohortVcf;
+    private final FeatureReader<VariantContext> clusteredVCFReader;
 
     /**
      * Constructor.
@@ -70,16 +86,44 @@ public final class GermlineCNVSegmentVariantComposer extends GermlineCNVVariantC
      * @param allosomalContigSet set of allosomal contigs (ref copy-number allele be chosen according to
      *                           given contig baseline copy-number states)
      * @param reference may be null
+     *
      */
     public GermlineCNVSegmentVariantComposer(final VariantContextWriter outputWriter,
                                              final String sampleName,
                                              final IntegerCopyNumberState refAutosomalCopyNumberState,
                                              final Set<String> allosomalContigSet,
-                                             final ReferenceSequenceFile reference) {
+                                             final ReferenceSequenceFile reference,
+                                             final int dupeQSThreshold,
+                                             final int hetDelQSThreshold,
+                                             final int homDelQSThreshold,
+                                             final int siteFreqThreshold,
+                                             final File clusteredCohortVcf) {
         super(outputWriter, sampleName);
         this.refAutosomalCopyNumberState = Utils.nonNull(refAutosomalCopyNumberState);
         this.allosomalContigSet = Utils.nonNull(allosomalContigSet);
         this.reference = reference;
+        this.dupeQSThreshold = dupeQSThreshold;
+        this.hetDelQSThreshold = hetDelQSThreshold;
+        this.homDelQSThreshold = homDelQSThreshold;
+        this.siteFreqThreshold = siteFreqThreshold;
+        this.clusteredCohortVcf = clusteredCohortVcf;
+        if (clusteredCohortVcf != null) {
+            try {
+                clusteredVCFReader = AbstractFeatureReader.getFeatureReader(clusteredCohortVcf.getAbsolutePath(), new VCFCodec());
+            } catch ( final TribbleException ex ) {
+                throw new GATKException("Error - IO problem with file " + clusteredCohortVcf, ex);
+            }
+        } else {
+            clusteredVCFReader = null;
+        }
+    }
+
+    public GermlineCNVSegmentVariantComposer(final VariantContextWriter outputWriter,
+                                             final String sampleName,
+                                             final IntegerCopyNumberState refAutosomalCopyNumberState,
+                                             final Set<String> allosomalContigSet,
+                                             final ReferenceSequenceFile reference) {
+        this(outputWriter, sampleName, refAutosomalCopyNumberState, allosomalContigSet, reference, 0, 0, 0, 0, null);
     }
 
     @Override
@@ -119,6 +163,11 @@ public final class GermlineCNVSegmentVariantComposer extends GermlineCNVVariantC
         /* INFO header lines */
         result.addMetaDataLine(new VCFInfoHeaderLine(VCFConstants.END_KEY, 1,
                 VCFHeaderLineType.Integer, "End coordinate of the variant"));
+
+        /*FILTER header lines */
+        result.addMetaDataLine(GATKSVVCFHeaderLines.getFilterLine(GATKSVVCFConstants.LOW_QS_SCORE_FILTER_KEY));
+        result.addMetaDataLine(GATKSVVCFHeaderLines.getFilterLine(GATKSVVCFConstants.FREQUENCY_FILTER_KEY));
+
         outputWriter.writeHeader(result);
     }
 
@@ -164,8 +213,36 @@ public final class GermlineCNVSegmentVariantComposer extends GermlineCNVVariantC
         }
         variantContextBuilder.alleles(uniquifiedAlleles);
         variantContextBuilder.attribute(VCFConstants.END_KEY, end);
+
+        //copy over allele frequency etc.
+        if (clusteredCohortVcf != null) {
+            final VariantContext cohortVC = clusteredVCFReader.query(
+                    segment.getContig(), segment.getStart(), segment.getEnd()).stream().filter(vc -> vc.getStart() == segment.getStart() && vc.getEnd() == segment.getEnd()).collect(Collectors.toList()).get(0);
+            //match segment end
+            if (!(cohortVC == null)) {
+                if (cohortVC.hasAttribute(VCFConstants.ALLELE_COUNT_KEY)) {
+                    final int cohortAC = cohortVC.getAttributeAsInt(VCFConstants.ALLELE_COUNT_KEY, -1);
+                    if (cohortAC > -1) {
+                        variantContextBuilder.attribute(GATKVCFConstants.ORIGINAL_AC_KEY, cohortAC);
+                    }
+                }
+                if (cohortVC.hasAttribute(VCFConstants.ALLELE_FREQUENCY_KEY)) {
+                    final double cohortAF = cohortVC.getAttributeAsDouble(VCFConstants.ALLELE_FREQUENCY_KEY, -1);
+                    if (cohortAF > -1) {
+                        variantContextBuilder.attribute(GATKVCFConstants.ORIGINAL_AF_KEY, cohortAF);
+                    }
+                }
+                if (cohortVC.hasAttribute(VCFConstants.ALLELE_NUMBER_KEY)) {
+                    final int cohortAN = cohortVC.getAttributeAsInt(VCFConstants.ALLELE_NUMBER_KEY, -1);
+                    if (cohortAN > -1) {
+                        variantContextBuilder.attribute(GATKVCFConstants.ORIGINAL_AN_KEY, cohortAN);
+                    }
+                }
+            }
+        }
         variantContextBuilder.genotypes(genotype);
         variantContextBuilder.log10PError(segment.getQualitySomeCalled()/-10.0);
+        variantContextBuilder.filters(getInfoFilters(segment));
         return variantContextBuilder.make();
     }
 
@@ -220,5 +297,24 @@ public final class GermlineCNVSegmentVariantComposer extends GermlineCNVVariantC
             allele = refAllele;
         }
         return allele;
+    }
+
+    private Set<String> getInfoFilters(final IntegerCopyNumberSegment segment) {
+        final Set<String> returnFilters = new LinkedHashSet<>();
+        final int qsThreshold;
+        if (segment.getCallIntegerCopyNumberState().getCopyNumber() == 0) {
+            qsThreshold = homDelQSThreshold;
+        } else if (segment.getCallIntegerCopyNumberState().getCopyNumber() > segment.getBaselineIntegerCopyNumberState().getCopyNumber()) {
+            qsThreshold = dupeQSThreshold;
+        } else if (segment.getCallIntegerCopyNumberState().getCopyNumber() < segment.getBaselineIntegerCopyNumberState().getCopyNumber()) {
+            qsThreshold = hetDelQSThreshold;
+        } else {
+            qsThreshold = 0;
+        }
+        if (segment.getQualitySomeCalled() < qsThreshold) {
+            returnFilters.add(GATKSVVCFConstants.LOW_QS_SCORE_FILTER_KEY);
+        }
+
+        return returnFilters;
     }
 }
