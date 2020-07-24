@@ -1,6 +1,7 @@
 package org.broadinstitute.hellbender.tools.sv;
 
 import htsjdk.tribble.Feature;
+import htsjdk.variant.variantcontext.Allele;
 import htsjdk.variant.variantcontext.Genotype;
 import htsjdk.variant.variantcontext.StructuralVariantType;
 import htsjdk.variant.variantcontext.VariantContext;
@@ -63,24 +64,45 @@ public class SVCallRecord implements Feature {
         return new SVCallRecord(startContig, start, startStrand, endContig, end, endStrand, type, length, algorithms, variant.getGenotypes());
     }
 
+    /**
+     *
+     * @param variant single-sample variant from a gCNV segments VCF
+     * @param minQuality
+     * @return
+     */
     public static SVCallRecord createDepthOnlyFromGCNV(final VariantContext variant, final double minQuality) {
         Utils.nonNull(variant);
-        final List<Genotype> passing = variant.getGenotypes().stream()
-                .filter(Genotype::isCalled)
-                .filter(g -> Integer.valueOf((String)g.getExtendedAttribute(GermlineCNVSegmentVariantComposer.QS)) >= minQuality)
-                .collect(Collectors.toList());
-        if (passing.isEmpty()) return null;
+        Utils.validate(variant.getGenotypes().size() == 1, "SVCallRecords can only be created from single-sample VCs.");
+
+        final Genotype g = variant.getGenotypes().get(0);
+        if (Integer.valueOf((String)g.getExtendedAttribute(GermlineCNVSegmentVariantComposer.QS)) < minQuality) {
+            return null;
+        }
         final List<String> algorithms = Collections.singletonList(GATKSVVCFConstants.DEPTH_ALGORITHM);
 
-        //TODO : use new vcfs to get actual allele
-        final Genotype g = variant.getGenotypes().get(0);
-        final int copyNumber = Integer.valueOf((String)g.getExtendedAttribute(GermlineCNVSegmentVariantComposer.CN));
-        //TODO: put this back in after we fix Postprocess genotypes
-        //final int ploidy = g.getPloidy();
-        final int ploidy = 2;
+        final boolean isDel;
         //don't cluster homRef events
-        if (copyNumber == ploidy) { return null; }
-        final boolean isDel = copyNumber - ploidy < 0;
+        if (variant.getReference().equals(Allele.REF_N)) {  //old segments VCFs had ref Ns and genotypes that didn't reflect ploidy accurately
+            if (g.getAlleles().size() != 1) {
+                throw new IllegalArgumentException("Unknown segment VCF schema.  Versions with N* ref allele are assumed to have haploid genotypes.");
+            }
+            if (g.getAllele(0).isReference()) {
+                return null;
+            }
+            if (g.getAllele(0).equals(GermlineCNVSegmentVariantComposer.DEL_ALLELE)) {
+                isDel = true;
+            } else if (g.getAllele(0).equals(GermlineCNVSegmentVariantComposer.DUP_ALLELE)) {
+                isDel = false;
+            } else {
+                throw new IllegalArgumentException("Segment VCF schema expects <DEL> and <DUP> allele, but found " + g.getAllele(0) + " at " + variant.getContig() + ":" + variant.getStart());
+            }
+        } else {  //spec-compliant VCFs will have some no-call GTs since dupes can't be phased
+            final int ploidy = g.getPloidy();
+            final int copyNumber = Integer.valueOf((String)g.getExtendedAttribute(GermlineCNVSegmentVariantComposer.CN));
+            if (copyNumber == ploidy) { return null; }
+            isDel = copyNumber - ploidy < 0;
+        }
+
         final boolean startStrand = isDel ? true : false;
         final boolean endStrand = isDel ? false : true;
         final StructuralVariantType type = isDel ? StructuralVariantType.DEL : StructuralVariantType.DUP;
@@ -89,7 +111,7 @@ public class SVCallRecord implements Feature {
         final int start = variant.getStart();
         final int end = variant.getEnd();
         final int length = end - start;
-        return new SVCallRecord(startContig, start, startStrand, startContig, end, endStrand, type, length, algorithms, passing);
+        return new SVCallRecord(startContig, start, startStrand, startContig, end, endStrand, type, length, algorithms, Collections.singletonList(g));
     }
 
     public SVCallRecord(final String startContig,

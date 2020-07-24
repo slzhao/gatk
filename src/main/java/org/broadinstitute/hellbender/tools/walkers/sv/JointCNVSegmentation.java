@@ -2,6 +2,7 @@ package org.broadinstitute.hellbender.tools.walkers.sv;
 
 import com.google.common.collect.Lists;
 import htsjdk.samtools.SAMSequenceDictionary;
+import htsjdk.samtools.reference.ReferenceSequenceFile;
 import htsjdk.variant.variantcontext.*;
 import htsjdk.variant.variantcontext.writer.VariantContextWriter;
 import htsjdk.variant.vcf.VCFConstants;
@@ -30,6 +31,7 @@ import org.broadinstitute.hellbender.tools.sv.SVCallRecordWithEvidence;
 import org.broadinstitute.hellbender.tools.sv.SVDepthOnlyCallDefragmenter;
 import org.broadinstitute.hellbender.utils.*;
 import org.broadinstitute.hellbender.utils.genotyper.IndexedSampleList;
+import org.broadinstitute.hellbender.utils.reference.ReferenceUtils;
 import org.broadinstitute.hellbender.utils.variant.GATKVCFConstants;
 import org.broadinstitute.hellbender.utils.variant.GATKVCFHeaderLines;
 import org.broadinstitute.hellbender.utils.variant.HomoSapiensConstants;
@@ -158,6 +160,9 @@ public class JointCNVSegmentation extends MultiVariantWalkerGroupedOnStart {
             currentContig = variantContexts.get(0).getContig();
         }
         for (final VariantContext vc : variantContexts) {
+            if (vc.getGenotypes().size() != 1) {
+                throw new UserException.BadInput("JointCNVSegmentation tool operates on single-sample segments VCFs.");
+            }
             final SVCallRecord record = SVCallRecord.createDepthOnlyFromGCNV(vc, minQS);
             if (record != null) {
                 defragmenter.add(new SVCallRecordWithEvidence(record));
@@ -180,10 +185,11 @@ public class JointCNVSegmentation extends MultiVariantWalkerGroupedOnStart {
     }
 
     private void write(final List<SVCallRecordWithEvidence> calls) {
+        final ReferenceSequenceFile reference = ReferenceUtils.createReferenceReader(referenceArguments.getReferenceSpecifier());
         final List<VariantContext> sortedCalls = calls.stream()
                 .sorted(Comparator.comparing(c -> new SimpleInterval(c.getContig(), c.getStart(), c.getEnd()), //VCs have to be sorted by end as well
                         IntervalUtils.getDictionaryOrderComparator(dictionary)))
-                .map(this::buildVariantContext)
+                .map(record -> buildVariantContext(record, reference))
                 .collect(Collectors.toList());
         Iterator<VariantContext> it = sortedCalls.iterator();
         ArrayList<VariantContext> overlappingVCs = new ArrayList<>();
@@ -311,24 +317,23 @@ public class JointCNVSegmentation extends MultiVariantWalkerGroupedOnStart {
         return builder.make();
     }
 
-    public VariantContext buildVariantContext(final SVCallRecordWithEvidence call) {
+    public VariantContext buildVariantContext(final SVCallRecordWithEvidence call, final ReferenceSequenceFile reference) {
         Utils.nonNull(call);
+        Utils.nonNull(reference);
         final Allele altAllele = Allele.create("<" + call.getType().name() + ">", false);
-        final Allele refAllele = Allele.REF_N;
+        final Allele refAllele = Allele.create(ReferenceUtils.getRefBaseAtPosition(reference, call.getContig(), call.getStart()), true);
         final VariantContextBuilder builder = new VariantContextBuilder("", call.getContig(), call.getStart(), call.getEnd(),
                 Lists.newArrayList(refAllele, altAllele));
         builder.attribute(VCFConstants.END_KEY, call.getEnd());
         builder.attribute(GATKSVVCFConstants.SVLEN, call.getLength());
         builder.attribute(VCFConstants.SVTYPE, call.getType());
         final List<Genotype> genotypes = new ArrayList<>();
-        //TODO: I don't need this for loop
         for (final Genotype g : call.getGenotypes()) {
             final GenotypeBuilder genotypeBuilder = new GenotypeBuilder(g);
             genotypeBuilder.alleles(Lists.newArrayList(refAllele, altAllele));
              if (g.hasAnyAttribute(GermlineCNVSegmentVariantComposer.CN)) {
                 genotypeBuilder.attribute(GermlineCNVSegmentVariantComposer.CN, g.getExtendedAttribute(GermlineCNVSegmentVariantComposer.CN));
             }
-
             genotypes.add(genotypeBuilder.make());
         }
         builder.genotypes(genotypes);

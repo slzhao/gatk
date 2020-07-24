@@ -4,18 +4,22 @@ import com.google.common.annotations.VisibleForTesting;
 import htsjdk.samtools.SAMSequenceDictionary;
 import htsjdk.samtools.reference.ReferenceSequenceFile;
 import htsjdk.tribble.AbstractFeatureReader;
+import htsjdk.tribble.CloseableTribbleIterator;
 import htsjdk.tribble.FeatureReader;
 import htsjdk.tribble.TribbleException;
 import htsjdk.variant.variantcontext.*;
 import htsjdk.variant.variantcontext.writer.VariantContextWriter;
 import htsjdk.variant.vcf.*;
 import org.apache.commons.math3.util.FastMath;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.broadinstitute.hellbender.exceptions.GATKException;
 import org.broadinstitute.hellbender.tools.copynumber.GermlineCNVCaller;
 import org.broadinstitute.hellbender.tools.copynumber.PostprocessGermlineCNVCalls;
 import org.broadinstitute.hellbender.tools.copynumber.formats.records.IntegerCopyNumberSegment;
 import org.broadinstitute.hellbender.tools.spark.sv.utils.GATKSVVCFConstants;
 import org.broadinstitute.hellbender.tools.spark.sv.utils.GATKSVVCFHeaderLines;
+import org.broadinstitute.hellbender.utils.SimpleInterval;
 import org.broadinstitute.hellbender.utils.Utils;
 import org.broadinstitute.hellbender.utils.reference.ReferenceUtils;
 import org.broadinstitute.hellbender.utils.variant.GATKVCFConstants;
@@ -66,6 +70,8 @@ public final class GermlineCNVSegmentVariantComposer extends GermlineCNVVariantC
      * Quality metric (segment end)
      */
     public static final String QSE = "QSE";
+
+    protected final Logger logger = LogManager.getLogger(this.getClass());
 
     private final IntegerCopyNumberState refAutosomalCopyNumberState;
     private final Set<String> allosomalContigSet;
@@ -215,29 +221,36 @@ public final class GermlineCNVSegmentVariantComposer extends GermlineCNVVariantC
         variantContextBuilder.attribute(VCFConstants.END_KEY, end);
 
         //copy over allele frequency etc.
-        if (clusteredCohortVcf != null) {
-            final VariantContext cohortVC = clusteredVCFReader.query(
-                    segment.getContig(), segment.getStart(), segment.getEnd()).stream().filter(vc -> vc.getStart() == segment.getStart() && vc.getEnd() == segment.getEnd()).collect(Collectors.toList()).get(0);
-            //match segment end
-            if (!(cohortVC == null)) {
-                if (cohortVC.hasAttribute(VCFConstants.ALLELE_COUNT_KEY)) {
-                    final int cohortAC = cohortVC.getAttributeAsInt(VCFConstants.ALLELE_COUNT_KEY, -1);
-                    if (cohortAC > -1) {
-                        variantContextBuilder.attribute(GATKVCFConstants.ORIGINAL_AC_KEY, cohortAC);
+        if (clusteredVCFReader != null) {
+            try {
+                final VariantContext cohortVC = clusteredVCFReader.query(
+                        segment.getContig(), segment.getStart(), segment.getEnd()).stream().filter(vc -> vc.getStart() == segment.getStart() && vc.getEnd() == segment.getEnd()).collect(Collectors.toList()).get(0);
+                //match segment end
+                if (!(cohortVC == null)) {
+                    if (cohortVC.hasAttribute(VCFConstants.ALLELE_COUNT_KEY)) {
+                        final int cohortAC = cohortVC.getAttributeAsInt(VCFConstants.ALLELE_COUNT_KEY, -1);
+                        if (cohortAC > -1) {
+                            variantContextBuilder.attribute(GATKVCFConstants.ORIGINAL_AC_KEY, cohortAC);
+                        }
                     }
-                }
-                if (cohortVC.hasAttribute(VCFConstants.ALLELE_FREQUENCY_KEY)) {
-                    final double cohortAF = cohortVC.getAttributeAsDouble(VCFConstants.ALLELE_FREQUENCY_KEY, -1);
-                    if (cohortAF > -1) {
-                        variantContextBuilder.attribute(GATKVCFConstants.ORIGINAL_AF_KEY, cohortAF);
+                    if (cohortVC.hasAttribute(VCFConstants.ALLELE_FREQUENCY_KEY)) {
+                        final double cohortAF = cohortVC.getAttributeAsDouble(VCFConstants.ALLELE_FREQUENCY_KEY, -1);
+                        if (cohortAF > -1) {
+                            variantContextBuilder.attribute(GATKVCFConstants.ORIGINAL_AF_KEY, cohortAF);
+                        }
                     }
-                }
-                if (cohortVC.hasAttribute(VCFConstants.ALLELE_NUMBER_KEY)) {
-                    final int cohortAN = cohortVC.getAttributeAsInt(VCFConstants.ALLELE_NUMBER_KEY, -1);
-                    if (cohortAN > -1) {
-                        variantContextBuilder.attribute(GATKVCFConstants.ORIGINAL_AN_KEY, cohortAN);
+                    if (cohortVC.hasAttribute(VCFConstants.ALLELE_NUMBER_KEY)) {
+                        final int cohortAN = cohortVC.getAttributeAsInt(VCFConstants.ALLELE_NUMBER_KEY, -1);
+                        if (cohortAN > -1) {
+                            variantContextBuilder.attribute(GATKVCFConstants.ORIGINAL_AN_KEY, cohortAN);
+                        }
                     }
+                } else {
+                    logger.warn("No matching cohort VC at " + segment.getContig() + ":" + segment.getStart());
                 }
+            } catch (final IOException e) {
+                throw new GATKException("Error querying file " + clusteredCohortVcf + " over interval " +
+                        new SimpleInterval(segment.getContig(), segment.getStart(), segment.getEnd()), e);
             }
         }
         variantContextBuilder.genotypes(genotype);
