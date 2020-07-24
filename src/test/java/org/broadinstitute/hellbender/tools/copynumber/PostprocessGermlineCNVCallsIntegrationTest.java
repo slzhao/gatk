@@ -1,6 +1,7 @@
 package org.broadinstitute.hellbender.tools.copynumber;
 
 import htsjdk.samtools.util.FileExtensions;
+import htsjdk.variant.variantcontext.Allele;
 import htsjdk.variant.variantcontext.Genotype;
 import htsjdk.variant.variantcontext.VariantContext;
 import htsjdk.variant.vcf.VCFConstants;
@@ -135,18 +136,21 @@ public final class PostprocessGermlineCNVCallsIntegrationTest extends CommandLin
     }
 
     private ArgumentsBuilder getArgsWithBreakpoints(final List<String> callShards,
-                                        final List<String> modelShards,
-                                        final int sampleIndex,
-                                        final File intervalsOutputVCF,
-                                        final File segmentsOutputVCF,
-                                        final File denoisedCopyRatiosOutput,
-                                        final List<String> allosomalContigs,
-                                        final int refAutosomalCopyNumber,
-                                        final File combinedIntervalsVCF,
-                                        final File clusteredVCF) {
+                                                    final List<String> modelShards,
+                                                    final int sampleIndex,
+                                                    final File intervalsOutputVCF,
+                                                    final File segmentsOutputVCF,
+                                                    final File denoisedCopyRatiosOutput,
+                                                    final List<String> allosomalContigs,
+                                                    final int refAutosomalCopyNumber,
+                                                    final File combinedIntervalsVCF,
+                                                    final File clusteredVCF, File reference) {
         ArgumentsBuilder args = getArgsForSingleSample(callShards, modelShards, sampleIndex, intervalsOutputVCF, segmentsOutputVCF, denoisedCopyRatiosOutput, allosomalContigs, refAutosomalCopyNumber);
         args.add(PostprocessGermlineCNVCalls.CLUSTERED_FILE_LONG_NAME, clusteredVCF);
         args.add(PostprocessGermlineCNVCalls.COMBINED_INTERVALS_LONG_NAME, combinedIntervalsVCF);
+        if (reference != null) {
+            args.addReference(reference);
+        }
         return args;
     }
 
@@ -211,7 +215,7 @@ public final class PostprocessGermlineCNVCallsIntegrationTest extends CommandLin
                 createTempFile("intervals-output-vcf", ".vcf"),
                 segmentsOutput,
                 createTempFile("denoised-copy-ratios-output", ".tsv"),
-                ALLOSOMAL_CONTIGS, 2, new File(TEST_SUB_DIR, "intervals_output_SAMPLE_000.vcf.gz"), CLUSTERED_VCF);
+                ALLOSOMAL_CONTIGS, 2, new File(TEST_SUB_DIR, "intervals_output_SAMPLE_000.vcf.gz"), CLUSTERED_VCF, null);
         runCommandLine(args);
 
         //...and one sample with variants
@@ -220,7 +224,7 @@ public final class PostprocessGermlineCNVCallsIntegrationTest extends CommandLin
                 createTempFile("intervals-output-vcf", ".vcf"),
                 segmentsOutput2,
                 createTempFile("denoised-copy-ratios-output", ".tsv"),
-                ALLOSOMAL_CONTIGS, 2, new File(TEST_SUB_DIR, "intervals_output_SAMPLE_001.vcf.gz"), CLUSTERED_VCF);
+                ALLOSOMAL_CONTIGS, 2, new File(TEST_SUB_DIR, "intervals_output_SAMPLE_001.vcf.gz"), CLUSTERED_VCF, null);
         runCommandLine(args2);
 
         final Pair<VCFHeader, List<VariantContext>> output = VariantContextTestUtils.readEntireVCFIntoMemory(segmentsOutput.getAbsolutePath());
@@ -249,36 +253,42 @@ public final class PostprocessGermlineCNVCallsIntegrationTest extends CommandLin
         GATKBaseTest.assertCondition(clusteredBreakpoints.getRight(), output2.getRight(), CHECK_VC_START);
         GATKBaseTest.assertCondition(clusteredBreakpoints.getRight(), output2.getRight(), CHECK_VC_END);
 
+        //TODO: check attributes are copied over
+
         //sample001 has a del and a dup on chromosome 2
         Assert.assertTrue(output2.getRight().stream().anyMatch(vc -> vc.getContig().equals("2") &&
+                vc.isVariant() &&
                 vc.getAlternateAllele(0).equals(GermlineCNVSegmentVariantComposer.DEL_ALLELE) &&
                 vc.getGenotype(0).getPloidy() == 2 &&
                 vc.getGenotype(0).isHomVar() && //calls are diploid homVar because CN0
                 vc.getGenotype(0).getExtendedAttribute(GATKSVVCFConstants.COPY_NUMBER_FORMAT).toString().equals("0")));
 
         Assert.assertTrue(output2.getRight().stream().anyMatch(vc -> vc.getContig().equals("2") &&
+                vc.isVariant() &&
                 vc.getAlternateAllele(0).equals(GermlineCNVSegmentVariantComposer.DUP_ALLELE) &&
                 vc.getGenotypes().get(0).isNoCall() &&
                 vc.getGenotype(0).getPloidy() == 2 && //dupes on autosomes are diploid no-call
                 vc.getGenotype(0).getExtendedAttribute(GATKSVVCFConstants.COPY_NUMBER_FORMAT).toString().equals("4")));
 
         Assert.assertTrue(output2.getRight().stream().anyMatch(vc -> vc.getContig().equals("X") &&
+                vc.isVariant() &&
                 vc.getAlternateAllele(0).equals(GermlineCNVSegmentVariantComposer.DUP_ALLELE) &&
                 vc.getGenotypes().get(0).isHomVar() &&
                 vc.getGenotype(0).getPloidy() == 1 && //dupes on autosomes are diploid no-call
                 vc.getGenotype(0).getExtendedAttribute(GATKSVVCFConstants.COPY_NUMBER_FORMAT).toString().equals("3")));
 
-        Assert.assertTrue(output2.getRight().stream().anyMatch(vc -> vc.getContig().equals("X") &&
-                vc.getAlternateAllele(0).equals(GermlineCNVSegmentVariantComposer.DUP_ALLELE) &&
-                vc.getGenotypes().get(0).isHomVar() &&
-                vc.getGenotype(0).getPloidy() == 1 && //dupes on autosomes are diploid no-call
+        //this CN4 variant has a QS of 18 and isn't included in the clustered breakpoints file, so it shouldn't be output
+        Assert.assertFalse(output2.getRight().stream().anyMatch(vc -> vc.getContig().equals("X") &&
+                vc.isVariant() &&
                 vc.getGenotype(0).getExtendedAttribute(GATKSVVCFConstants.COPY_NUMBER_FORMAT).toString().equals("4")));
 
+        //chrY is all reference with ploidy 1
         Assert.assertTrue(output2.getRight().stream().anyMatch(vc -> vc.getContig().equals("Y") &&
-                vc.getAlternateAllele(0).equals(GermlineCNVSegmentVariantComposer.DUP_ALLELE) &&
-                vc.getGenotypes().get(0).isHomVar() &&
-                vc.getGenotype(0).getPloidy() == 1 && //dupes on haploid allosomes are homVar
-                vc.getGenotype(0).getExtendedAttribute(GATKSVVCFConstants.COPY_NUMBER_FORMAT).toString().equals("3")));
+                !vc.isVariant() &&
+                vc.getAlternateAlleles().size() == 0 &&
+                vc.getGenotypes().get(0).isHomRef() &&
+                vc.getGenotype(0).getPloidy() == 1 &&
+                vc.getGenotype(0).getExtendedAttribute(GATKSVVCFConstants.COPY_NUMBER_FORMAT).toString().equals("1")));
 
         //compare sample001 with new QUALs against its single-sample segmented results
         // should have same Q score where breakpoints match, zero if breakpoint was moved in clustering
@@ -301,7 +311,24 @@ public final class PostprocessGermlineCNVCallsIntegrationTest extends CommandLin
             }
         }
 
-        //TODO: test with input reference and check ref alleles
+        //rerun sample 001 with a reference and check reference allele output
+        final File segmentsOutput3 = createTempFile("segments-output-vcf", ".vcf");
+        final ArgumentsBuilder args3 = getArgsWithBreakpoints(CALL_SHARDS, MODEL_SHARDS, 1,
+                createTempFile("intervals-output-vcf", ".vcf"),
+                segmentsOutput3,
+                createTempFile("denoised-copy-ratios-output", ".tsv"),
+                ALLOSOMAL_CONTIGS, 2, new File(TEST_SUB_DIR, "intervals_output_SAMPLE_001.vcf.gz"), CLUSTERED_VCF, new File(GATKBaseTest.b37Reference));
+        runCommandLine(args3);
+
+        final Pair<VCFHeader, List<VariantContext>> output3 = VariantContextTestUtils.readEntireVCFIntoMemory(segmentsOutput3.getAbsolutePath());
+        Assert.assertTrue(output3.getRight().get(0).getStart() == 230925 && output3.getRight().get(0).getReference().equals(Allele.REF_G));
+        Assert.assertTrue(output3.getRight().get(1).getStart() == 233003 && output3.getRight().get(1).getReference().equals(Allele.REF_A));
+        Assert.assertTrue(output3.getRight().get(2).getStart() == 1415190 && output3.getRight().get(2).getReference().equals(Allele.REF_T));
+        Assert.assertTrue(output3.getRight().get(3).getStart() == 197963 && output3.getRight().get(3).getReference().equals(Allele.REF_T));
+        Assert.assertTrue(output3.getRight().get(4).getStart() == 223929 && output3.getRight().get(4).getReference().equals(Allele.REF_A));
+        Assert.assertTrue(output3.getRight().get(5).getStart() == 294570 && output3.getRight().get(5).getReference().equals(Allele.REF_G));
+        //The chrY entry starts in PAR1, so it does get a legit N
+        Assert.assertTrue(output3.getRight().get(6).getStart() == 147963 &&output3.getRight().get(6).getReference().equals(Allele.REF_N));
     }
 
     @DataProvider(name = "differentValidInput")

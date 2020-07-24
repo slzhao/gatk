@@ -79,7 +79,7 @@ public final class GermlineCNVSegmentVariantComposer extends GermlineCNVVariantC
     private final int dupeQSThreshold;
     private final int hetDelQSThreshold;
     private final int homDelQSThreshold;
-    private final int siteFreqThreshold;
+    private final double siteFreqThreshold;
     private final File clusteredCohortVcf;
     private final FeatureReader<VariantContext> clusteredVCFReader;
 
@@ -102,7 +102,7 @@ public final class GermlineCNVSegmentVariantComposer extends GermlineCNVVariantC
                                              final int dupeQSThreshold,
                                              final int hetDelQSThreshold,
                                              final int homDelQSThreshold,
-                                             final int siteFreqThreshold,
+                                             final double siteFreqThreshold,
                                              final File clusteredCohortVcf) {
         super(outputWriter, sampleName);
         this.refAutosomalCopyNumberState = Utils.nonNull(refAutosomalCopyNumberState);
@@ -145,6 +145,10 @@ public final class GermlineCNVSegmentVariantComposer extends GermlineCNVVariantC
         vcfDefaultToolHeaderLines.forEach(result::addMetaDataLine);
 
         result.setSequenceDictionary(sequenceDictionary);
+
+        /* header lines for annotations copied from cohort VCF */
+        result.addMetaDataLine(GATKSVVCFHeaderLines.getInfoLine(GATKSVVCFConstants.SVTYPE));
+        result.addMetaDataLine(GATKSVVCFHeaderLines.getInfoLine(GATKSVVCFConstants.SVLEN));
 
         /* header lines related to genotype formatting */
         result.addMetaDataLine(new VCFFormatHeaderLine(VCFConstants.GENOTYPE_KEY, 1,
@@ -227,24 +231,11 @@ public final class GermlineCNVSegmentVariantComposer extends GermlineCNVVariantC
                         segment.getContig(), segment.getStart(), segment.getEnd()).stream().filter(vc -> vc.getStart() == segment.getStart() && vc.getEnd() == segment.getEnd()).collect(Collectors.toList()).get(0);
                 //match segment end
                 if (!(cohortVC == null)) {
-                    if (cohortVC.hasAttribute(VCFConstants.ALLELE_COUNT_KEY)) {
-                        final int cohortAC = cohortVC.getAttributeAsInt(VCFConstants.ALLELE_COUNT_KEY, -1);
-                        if (cohortAC > -1) {
-                            variantContextBuilder.attribute(GATKVCFConstants.ORIGINAL_AC_KEY, cohortAC);
-                        }
-                    }
-                    if (cohortVC.hasAttribute(VCFConstants.ALLELE_FREQUENCY_KEY)) {
-                        final double cohortAF = cohortVC.getAttributeAsDouble(VCFConstants.ALLELE_FREQUENCY_KEY, -1);
-                        if (cohortAF > -1) {
-                            variantContextBuilder.attribute(GATKVCFConstants.ORIGINAL_AF_KEY, cohortAF);
-                        }
-                    }
-                    if (cohortVC.hasAttribute(VCFConstants.ALLELE_NUMBER_KEY)) {
-                        final int cohortAN = cohortVC.getAttributeAsInt(VCFConstants.ALLELE_NUMBER_KEY, -1);
-                        if (cohortAN > -1) {
-                            variantContextBuilder.attribute(GATKVCFConstants.ORIGINAL_AN_KEY, cohortAN);
-                        }
-                    }
+                    copyAnnotationIfPresent(cohortVC, variantContextBuilder, VCFConstants.ALLELE_COUNT_KEY, GATKVCFConstants.ORIGINAL_AC_KEY);
+                    copyAnnotationIfPresent(cohortVC, variantContextBuilder, VCFConstants.ALLELE_FREQUENCY_KEY, GATKVCFConstants.ORIGINAL_AF_KEY);
+                    copyAnnotationIfPresent(cohortVC, variantContextBuilder, VCFConstants.ALLELE_NUMBER_KEY, GATKVCFConstants.ORIGINAL_AN_KEY);
+                    copyAnnotationIfPresent(cohortVC, variantContextBuilder, GATKSVVCFConstants.SVTYPE, GATKSVVCFConstants.SVTYPE);
+                    copyAnnotationIfPresent(cohortVC, variantContextBuilder, GATKSVVCFConstants.SVLEN, GATKSVVCFConstants.SVLEN);
                 } else {
                     logger.warn("No matching cohort VC at " + segment.getContig() + ":" + segment.getStart());
                 }
@@ -255,8 +246,27 @@ public final class GermlineCNVSegmentVariantComposer extends GermlineCNVVariantC
         }
         variantContextBuilder.genotypes(genotype);
         variantContextBuilder.log10PError(segment.getQualitySomeCalled()/-10.0);
-        variantContextBuilder.filters(getInfoFilters(segment));
+        //apply filters if we're running against the cohort VCF
+        if (clusteredCohortVcf != null) {
+            variantContextBuilder.filters(getInfoFilters(segment));
+        }
         return variantContextBuilder.make();
+    }
+
+    /**
+     *
+     * @param cohortVC
+     * @param variantContextBuilder is modified to add attribute (if found)
+     * @param annotationKeyToQuery
+     * @param annotationKeyToWrite
+     */
+    private void copyAnnotationIfPresent(final VariantContext cohortVC, final VariantContextBuilder variantContextBuilder, final String annotationKeyToQuery, final String annotationKeyToWrite) {
+        if (cohortVC.hasAttribute(annotationKeyToQuery)) {
+            final Object cohortValue = cohortVC.getAttribute(annotationKeyToQuery);
+            if (cohortValue != null) {
+                variantContextBuilder.attribute(annotationKeyToWrite, cohortValue);
+            }
+        }
     }
 
     private List<Allele> makeGenotypeAlleles(final int copyNumberCall, final int refCopyNumber, final Allele refAllele) {

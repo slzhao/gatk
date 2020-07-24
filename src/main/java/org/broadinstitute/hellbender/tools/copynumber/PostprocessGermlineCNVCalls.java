@@ -215,28 +215,32 @@ public final class PostprocessGermlineCNVCalls extends GATKTool {
     @Argument(
             doc = "Filter out heterozygous deletions with quality lower than this.",
             fullName = HET_DEL_QS_THRESHOLD_LONG_NAME,
-            optional = true
+            optional = true,
+            minValue = 0
     )
-    private double hetDelQSThreshold = 0;
+    private int hetDelQSThreshold = 0;
 
     @Argument(
             doc = "Filter out homozygous deletions with quality lower than this.",
             fullName = HOM_DEL_QS_THRESHOLD_LONG_NAME,
-            optional = true
+            optional = true,
+            minValue = 0
     )
-    private double homDelQSThreshold = 0;
+    private int homDelQSThreshold = 0;
 
     @Argument(
             doc = "Filter out duplications with quality lower than this.",
             fullName = DUPLICATION_QS_THRESHOLD_LONG_NAME,
-            optional = true
+            optional = true,
+            minValue = 0
     )
-    private double dupeQSThreshold = 0;
+    private int dupeQSThreshold = 0;
 
     @Argument(
             doc = "Filter out variants with site frequency higher than this.",
             fullName = SITE_FREQUENCY_THRESHOLD_LONG_NAME,
-            optional = true
+            optional = true,
+            minValue = 0
     )
     private double siteFrequencyThreshold = 0.00;
 
@@ -469,7 +473,8 @@ public final class PostprocessGermlineCNVCalls extends GATKTool {
                 new GermlineCNVSegmentVariantComposer(segmentsVCFWriter, sampleName,
                         refAutosomalIntegerCopyNumberState, allosomalContigSet,
                         referenceArguments.getReferenceSpecifier() == null ? null :
-                                ReferenceUtils.createReferenceReader(referenceArguments.getReferenceSpecifier()));
+                                ReferenceUtils.createReferenceReader(referenceArguments.getReferenceSpecifier()),
+                        dupeQSThreshold, hetDelQSThreshold, homDelQSThreshold, siteFrequencyThreshold, clusteredBreakpointsVCFFile);
         germlineCNVSegmentVariantComposer.composeVariantContextHeader(sequenceDictionary, getDefaultToolVCFHeaderLines());
         germlineCNVSegmentVariantComposer.writeAll(integerCopyNumberSegmentCollection.getRecords());
         segmentsVCFWriter.close();
