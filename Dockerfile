@@ -1,8 +1,6 @@
 # Using OpenJDK 8
 FROM broadinstitute/gatk:gatkbase-2.3.0
 
-GRADLE_OPTS=“-Xmx2048m -Dorg.gradle.daemon=false”
-
 # Location of the unzipped gatk bundle files
 ARG ZIPPATH
 
