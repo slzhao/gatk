@@ -714,11 +714,13 @@ public final class SelectVariants extends VariantWalker {
                 // Make a new entry if the we have not yet cached a PL to allele indices map for this ploidy and allele count
                 // skip if there are no PLs -- this avoids hanging on high-allelic somatic samples, for example, where
                 // there's no need for the PL indices since they don't exist
-                if (g.getPloidy() != 0 && (!ploidyToNumberOfAlleles.containsKey(g.getPloidy()) || ploidyToNumberOfAlleles.get(g.getPloidy()) < vc.getNAlleles())) {
-                    if (vc.getGenotypes().stream().anyMatch(Genotype::hasLikelihoods)) {
-                        GenotypeLikelihoods.initializeAnyploidPLIndexToAlleleIndices(vc.getNAlleles() - 1, g.getPloidy());
-                        ploidyToNumberOfAlleles.put(g.getPloidy(), vc.getNAlleles());
-                    }
+                final int genotypePloidy = g.getPloidy();
+                final int nAlleles = vc.getNAlleles();
+                if (genotypePloidy != 0
+                        && (!ploidyToNumberOfAlleles.containsKey(genotypePloidy) || ploidyToNumberOfAlleles.get(genotypePloidy) < nAlleles)
+                        && g.hasLikelihoods()) {
+                    GenotypeLikelihoods.initializeAnyploidPLIndexToAlleleIndices(nAlleles - 1, genotypePloidy);
+                    ploidyToNumberOfAlleles.put(genotypePloidy, nAlleles);
                 }
             }
         }
