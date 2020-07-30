@@ -129,7 +129,8 @@ public final class PostprocessGermlineCNVCalls extends GATKTool {
     public static final String OUTPUT_DENOISED_COPY_RATIOS_LONG_NAME = "output-denoised-copy-ratios";
     public static final String AUTOSOMAL_REF_COPY_NUMBER_LONG_NAME = "autosomal-ref-copy-number";
     public static final String ALLOSOMAL_CONTIG_LONG_NAME = "allosomal-contig";
-    public static final String COMBINED_INTERVALS_LONG_NAME = "combined-intervals-vcf";
+    public static final String INPUT_INTERVALS_LONG_NAME = "input-intervals-vcf";
+    public static final String INPUT_DENOISED_COPY_RATIO_LONG_NAME = "input-denoised-copy-ratio";
     public static final String CLUSTERED_FILE_LONG_NAME = "clustered-breakpoints";
     public static final String DUPLICATION_QS_THRESHOLD_LONG_NAME = "duplication-qs-threshold";
     public static final String HET_DEL_QS_THRESHOLD_LONG_NAME = "het-deletion-qs-threshold";
@@ -182,7 +183,7 @@ public final class PostprocessGermlineCNVCalls extends GATKTool {
 
     @Argument(
             doc = "Input VCF with combined intervals for all samples",
-            fullName = COMBINED_INTERVALS_LONG_NAME,
+            fullName = INPUT_INTERVALS_LONG_NAME,
             optional = true
     )
     private File combinedIntervalsVCFFile = null;
@@ -218,7 +219,7 @@ public final class PostprocessGermlineCNVCalls extends GATKTool {
             optional = true,
             minValue = 0
     )
-    private int hetDelQSThreshold = 0;
+    private int hetDelQSThreshold = 100;
 
     @Argument(
             doc = "Filter out homozygous deletions with quality lower than this.",
@@ -226,7 +227,7 @@ public final class PostprocessGermlineCNVCalls extends GATKTool {
             optional = true,
             minValue = 0
     )
-    private int homDelQSThreshold = 0;
+    private int homDelQSThreshold = 400;
 
     @Argument(
             doc = "Filter out duplications with quality lower than this.",
@@ -234,7 +235,7 @@ public final class PostprocessGermlineCNVCalls extends GATKTool {
             optional = true,
             minValue = 0
     )
-    private int dupeQSThreshold = 0;
+    private int dupeQSThreshold = 50;
 
     @Argument(
             doc = "Filter out variants with site frequency higher than this.",
@@ -242,7 +243,7 @@ public final class PostprocessGermlineCNVCalls extends GATKTool {
             optional = true,
             minValue = 0
     )
-    private double siteFrequencyThreshold = 0.00;
+    private double siteFrequencyThreshold = 0.01;
 
     /**
      * A list of {@link SimpleIntervalCollection} for each shard
@@ -293,6 +294,11 @@ public final class PostprocessGermlineCNVCalls extends GATKTool {
      * Model shard directories put in correct order
      */
     private List<File> sortedModelShardPaths;
+
+    /*@Override
+    public boolean requiresReference() {
+        return true;
+    }*/
 
     @Override
     public void onStartup() {

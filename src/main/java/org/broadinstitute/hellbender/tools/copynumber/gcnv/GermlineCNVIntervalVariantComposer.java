@@ -10,11 +10,14 @@ import org.broadinstitute.hellbender.tools.copynumber.GermlineCNVCaller;
 import org.broadinstitute.hellbender.tools.copynumber.PostprocessGermlineCNVCalls;
 import org.broadinstitute.hellbender.tools.copynumber.formats.records.CopyNumberPosteriorDistribution;
 import org.broadinstitute.hellbender.tools.copynumber.formats.records.IntervalCopyNumberGenotypingData;
+import org.broadinstitute.hellbender.tools.spark.sv.utils.GATKSVVCFConstants;
 import org.broadinstitute.hellbender.utils.MathUtils;
 import org.broadinstitute.hellbender.utils.Utils;
 
 import java.util.*;
 import java.util.stream.Collectors;
+
+import static org.broadinstitute.hellbender.tools.spark.sv.utils.GATKSVVCFConstants.DEL_ALLELE;
 
 /**
  * Helper class for {@link PostprocessGermlineCNVCalls} for single-sample postprocessing of
@@ -120,9 +123,9 @@ public final class GermlineCNVIntervalVariantComposer extends GermlineCNVVariant
 
         final Allele allele;
         if (copyNumberMAP > refCopyNumber.getCopyNumber()) {
-            allele = DUP_ALLELE;
+            allele = GATKSVVCFConstants.DUP_ALLELE;
         } else if (copyNumberMAP < refCopyNumber.getCopyNumber()) {
-            allele = DEL_ALLELE;
+            allele = GATKSVVCFConstants.DEL_ALLELE;
         } else {
             allele = REF_ALLELE;
         }

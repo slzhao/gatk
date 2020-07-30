@@ -1,5 +1,7 @@
 package org.broadinstitute.hellbender.tools.spark.sv.utils;
 
+import htsjdk.variant.variantcontext.Allele;
+
 public final class GATKSVVCFConstants {
 
     // todo: add these and the other standard SV info fields from the VCF spec to htsjdk VCFStandardHeaderLines
@@ -13,12 +15,16 @@ public final class GATKSVVCFConstants {
     public static final String BREAKEND_STR = "BND";
     public static final String BND_MATEID_STR = "MATEID";
 
+    // symbolic alt allele names
+    public static final String SYMB_ALT_STRING_INV = "INV";
+    public static final String SYMB_ALT_STRING_DEL = "DEL";
+    public static final String SYMB_ALT_STRING_INS = "INS";
+    public static final String SYMB_ALT_STRING_DUP = "DUP";
+    public static final String SYMB_ALT_STRING_INVDUP = "DUP:INV";
+
     // symbolic alt alleles
-    public static final String SYMB_ALT_ALLELE_INV = "INV";
-    public static final String SYMB_ALT_ALLELE_DEL = "DEL";
-    public static final String SYMB_ALT_ALLELE_INS = "INS";
-    public static final String SYMB_ALT_ALLELE_DUP = "DUP";
-    public static final String SYMB_ALT_ALLELE_INVDUP = "DUP:INV";
+    public static final Allele DEL_ALLELE = Allele.create("<DEL>", false);
+    public static final Allele DUP_ALLELE = Allele.create("<DUP>", false);
 
     // GATK-SV specific header lines
     // TODO: 10/3/17 the following comment is a goal we are trying to achieve

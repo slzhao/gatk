@@ -1,6 +1,8 @@
 version 1.0
 
 import "../cnv_common_tasks.wdl" as CNVTasks
+import "AnnotateChromosome.wdl" as AnnotateVcf
+import "Structs.wdl" as Structs
 
 workflow JointCallExomeCNVs {
 
@@ -10,6 +12,7 @@ workflow JointCallExomeCNVs {
     input {
       File intervals
       File? blacklist_intervals
+      File contig_ploidy_calls_tar
       Array[File]+ segments_vcfs
       Array[File]+ segments_vcf_indexes
       Array[File]+ intervals_vcf
@@ -26,14 +29,27 @@ workflow JointCallExomeCNVs {
       File ref_fasta_dict
       File ref_fasta_fai
       File ref_fasta
+      String x_contig_name
+      File  protein_coding_gtf
+      File  linc_rna_gtf
+      File  promoter_bed
+      File  noncoding_bed
       String gatk_docker
       String gatk_docker_clustering
+      String sv_pipeline_docker
+    }
+
+    call MakePedFile {
+      input:
+        contig_ploidy_calls_tar = contig_ploidy_calls_tar,
+        x_contig_name = x_contig_name
     }
 
     call JointSegmentation {
       input:
         segments_vcfs = segments_vcfs,
         segments_vcf_indexes = segments_vcf_indexes,
+        ped_file = MakePedFile.ped_file,
         ref_fasta = ref_fasta,
         ref_fasta_fai = ref_fasta_fai,
         ref_fasta_dict = ref_fasta_dict,
@@ -44,7 +60,7 @@ workflow JointCallExomeCNVs {
     Array[Array[File]] gcnv_calls_tars_T = transpose(gcnv_calls_tars)
 
     scatter (scatter_index in range(length(segments_vcfs))) {
-      call PostprocessGermlineCNVCalls as RecalcQual {
+      call CNVTasks.PostprocessGermlineCNVCalls as RecalcQual {
         input:
               entity_id = sub(sub(basename(intervals_vcf[scatter_index]), ".vcf.gz", ""), "intervals_output_", ""),
               gcnv_calls_tars = gcnv_calls_tars_T[scatter_index],
@@ -65,17 +81,60 @@ workflow JointCallExomeCNVs {
       }
     }
 
-    call CombineVariants {
+    call FastCombine {
       input:
         input_vcfs = RecalcQual.genotyped_segments_vcf,
         input_vcf_indexes = RecalcQual.genotyped_segments_vcf_index,
-        ref_fasta = ref_fasta,
-        ref_fasta_fai = ref_fasta_fai,
-        ref_fasta_dict = ref_fasta_dict
+        sv_pipeline_docker = sv_pipeline_docker
     }
+
+    # this annotates any vcf -- for exomes we can do all chromosomes at once
+    call AnnotateVcf.AnnotateChromosome {
+        input:
+          prefix = "combined.annotated",
+          vcf = FastCombine.combined_vcf,
+          protein_coding_gtf = protein_coding_gtf,
+          linc_rna_gtf = linc_rna_gtf,
+          promoter_bed = promoter_bed,
+          noncoding_bed = noncoding_bed,
+          sv_pipeline_docker = sv_pipeline_docker
+    }
+
     output {
-      File combined_calls = CombineVariants.combined_vcf
-      File combined_calls_index = CombineVariants.combined_vcf_index
+      File combined_calls = FastCombine.combined_vcf
+      File combined_calls_index = FastCombine.combined_vcf_index
+    }
+}
+
+task MakePedFile {
+  input {
+    File contig_ploidy_calls_tar
+    String x_contig_name
+  }
+
+  command <<<
+    set -e
+    tar -xf ~{contig_ploidy_calls_tar}
+    WORKSPACE=$( basename ~{contig_ploidy_calls_tar} .tar.gz)
+
+    for sample in $(ls -d -1 SAMPLE*)
+    do
+      sample_name=$(cat $sample/sample_name.txt)
+      x_ploidy=$(grep ^X $sample/contig_ploidy.tsv | cut -f 2)
+      printf "%s\t%s\t0\t0\t%s\t0\n" $sample_name $sample_name $x_ploidy >> cohort.ped
+    done
+    >>>
+
+    output {
+      File ped_file = "cohort.ped"
+    }
+
+    runtime {
+      docker: "alpine"
+      memory: "3000 MB"
+      disks: "local-disk 100 SSD"
+      cpu: 1
+      preemptible: 2
     }
 }
 
@@ -83,6 +142,7 @@ task JointSegmentation {
   input {
     Array[File] segments_vcfs
     Array[File] segments_vcf_indexes
+    File ped_file
     File ref_fasta_dict
     File ref_fasta_fai
     File ref_fasta
@@ -157,5 +217,33 @@ task CombineVariants {
   output {
     File combined_vcf = "combined.vcf"
     File combined_vcf_index = "combined.vcf.idx"
+  }
+}
+
+task FastCombine {
+  input {
+    Array[File] input_vcfs
+    Array[File] input_vcf_indexes
+    String sv_pipeline_docker
+    Int? preemptible_tries
+    Int? disk_size
+    Float? mem_gb
+  }
+
+  command <<<
+  bcftools merge -l ~{write_lines(input_vcfs)} -o combined.vcf.gz -O z --threads 4 -m all -0
+  >>>
+
+  output {
+    File combined_vcf = "combined.vcf.gz"
+    File combined_vcf_index = "combined.vcf.gz.tbi"
+  }
+
+  runtime {
+    docker: sv_pipeline_docker
+    preemptible: select_first([preemptible_tries, 2])
+    memory: select_first([mem_gb, 3.5]) + " GiB"
+    cpu: "1"
+    disks: "local-disk " + select_first([disk_size, 50]) + " HDD"
   }
 }

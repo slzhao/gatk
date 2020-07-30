@@ -4,7 +4,6 @@ import com.google.common.annotations.VisibleForTesting;
 import htsjdk.samtools.SAMSequenceDictionary;
 import htsjdk.samtools.reference.ReferenceSequenceFile;
 import htsjdk.tribble.AbstractFeatureReader;
-import htsjdk.tribble.CloseableTribbleIterator;
 import htsjdk.tribble.FeatureReader;
 import htsjdk.tribble.TribbleException;
 import htsjdk.variant.variantcontext.*;
@@ -22,9 +21,9 @@ import org.broadinstitute.hellbender.tools.spark.sv.utils.GATKSVVCFHeaderLines;
 import org.broadinstitute.hellbender.utils.SimpleInterval;
 import org.broadinstitute.hellbender.utils.Utils;
 import org.broadinstitute.hellbender.utils.reference.ReferenceUtils;
+import org.broadinstitute.hellbender.utils.variant.GATKSVVariantContextUtils;
 import org.broadinstitute.hellbender.utils.variant.GATKVCFConstants;
 import org.broadinstitute.hellbender.utils.variant.GATKVCFHeaderLines;
-import org.broadinstitute.hellbender.utils.variant.GATKVariantContextUtils;
 
 import java.io.File;
 import java.io.IOException;
@@ -149,6 +148,10 @@ public final class GermlineCNVSegmentVariantComposer extends GermlineCNVVariantC
         /* header lines for annotations copied from cohort VCF */
         result.addMetaDataLine(GATKSVVCFHeaderLines.getInfoLine(GATKSVVCFConstants.SVTYPE));
         result.addMetaDataLine(GATKSVVCFHeaderLines.getInfoLine(GATKSVVCFConstants.SVLEN));
+        result.addMetaDataLine(GATKVCFHeaderLines.getInfoLine(GATKVCFConstants.ORIGINAL_AC_KEY));
+        result.addMetaDataLine(GATKVCFHeaderLines.getInfoLine(GATKVCFConstants.ORIGINAL_AF_KEY));
+        result.addMetaDataLine(GATKVCFHeaderLines.getInfoLine(GATKVCFConstants.ORIGINAL_AN_KEY));
+
 
         /* header lines related to genotype formatting */
         result.addMetaDataLine(new VCFFormatHeaderLine(VCFConstants.GENOTYPE_KEY, 1,
@@ -205,7 +208,7 @@ public final class GermlineCNVSegmentVariantComposer extends GermlineCNVVariantC
         final IntegerCopyNumberState refCopyNumber = allosomalContigSet.contains(contig)
                 ? segment.getBaselineIntegerCopyNumberState()
                 : refAutosomalCopyNumberState;
-        genotypeBuilder.alleles(makeGenotypeAlleles(copyNumberCall, refCopyNumber.getCopyNumber(), refAllele));
+        genotypeBuilder.alleles(GATKSVVariantContextUtils.makeGenotypeAlleles(copyNumberCall, refCopyNumber.getCopyNumber(), refAllele));
         genotypeBuilder.attribute(CN, copyNumberCall);
         genotypeBuilder.attribute(NP, segment.getNumPoints());
         genotypeBuilder.attribute(QS, FastMath.round(segment.getQualitySomeCalled()));
@@ -217,14 +220,15 @@ public final class GermlineCNVSegmentVariantComposer extends GermlineCNVVariantC
         final Set<Allele> uniquifiedAlleles = new HashSet<>();
         uniquifiedAlleles.add(refAllele);
         if (copyNumberCall > refCopyNumber.getCopyNumber()) {
-            uniquifiedAlleles.add(DUP_ALLELE);  //dupes need additional alts since their genotypes are no-call
+            uniquifiedAlleles.add(GATKSVVCFConstants.DUP_ALLELE);  //dupes need additional alts since their genotypes are no-call
         } else if (copyNumberCall < refCopyNumber.getCopyNumber()) {
-            uniquifiedAlleles.add(DEL_ALLELE);  //dels may be no-call
+            uniquifiedAlleles.add(GATKSVVCFConstants.DEL_ALLELE);  //dels may be no-call
         }
         variantContextBuilder.alleles(uniquifiedAlleles);
         variantContextBuilder.attribute(VCFConstants.END_KEY, end);
 
         //copy over allele frequency etc.
+        double alleleFrequency = 0;
         if (clusteredVCFReader != null) {
             try {
                 final VariantContext cohortVC = clusteredVCFReader.query(
@@ -233,6 +237,7 @@ public final class GermlineCNVSegmentVariantComposer extends GermlineCNVVariantC
                 if (!(cohortVC == null)) {
                     copyAnnotationIfPresent(cohortVC, variantContextBuilder, VCFConstants.ALLELE_COUNT_KEY, GATKVCFConstants.ORIGINAL_AC_KEY);
                     copyAnnotationIfPresent(cohortVC, variantContextBuilder, VCFConstants.ALLELE_FREQUENCY_KEY, GATKVCFConstants.ORIGINAL_AF_KEY);
+                    alleleFrequency = cohortVC.getAttributeAsDouble(VCFConstants.ALLELE_FREQUENCY_KEY, 0);
                     copyAnnotationIfPresent(cohortVC, variantContextBuilder, VCFConstants.ALLELE_NUMBER_KEY, GATKVCFConstants.ORIGINAL_AN_KEY);
                     copyAnnotationIfPresent(cohortVC, variantContextBuilder, GATKSVVCFConstants.SVTYPE, GATKSVVCFConstants.SVTYPE);
                     copyAnnotationIfPresent(cohortVC, variantContextBuilder, GATKSVVCFConstants.SVLEN, GATKSVVCFConstants.SVLEN);
@@ -248,7 +253,7 @@ public final class GermlineCNVSegmentVariantComposer extends GermlineCNVVariantC
         variantContextBuilder.log10PError(segment.getQualitySomeCalled()/-10.0);
         //apply filters if we're running against the cohort VCF
         if (clusteredCohortVcf != null) {
-            variantContextBuilder.filters(getInfoFilters(segment));
+            variantContextBuilder.filters(getInfoFilters(segment, alleleFrequency));
         }
         return variantContextBuilder.make();
     }
@@ -269,60 +274,7 @@ public final class GermlineCNVSegmentVariantComposer extends GermlineCNVVariantC
         }
     }
 
-    private List<Allele> makeGenotypeAlleles(final int copyNumberCall, final int refCopyNumber, final Allele refAllele) {
-        final List<Allele> returnAlleles = new ArrayList<>();
-        final Allele genotypeAllele = getAlleleForCopyNumber(copyNumberCall, refCopyNumber, refAllele);
-        //some allosomes like Y can have ref copy number zero, in which case we just no-call
-        if (refCopyNumber == 0) {
-            return GATKVariantContextUtils.noCallAlleles(1);
-        }
-        //for only one haplotype we know which allele it has
-        if (refCopyNumber == 1) {
-           return Arrays.asList(getAlleleForCopyNumber(copyNumberCall, refCopyNumber, refAllele));
-        //can't determine counts per haplotypes if there is a duplication
-        } else if (genotypeAllele.equals(DUP_ALLELE)) {
-            return GATKVariantContextUtils.noCallAlleles(refCopyNumber);
-        //for homDels, hetDels or homRefs
-        } else if (refCopyNumber == 2) {
-            returnAlleles.add(genotypeAllele);
-            if (copyNumberCall == 0) {
-                returnAlleles.add(genotypeAllele);
-            } else {
-                returnAlleles.add(refAllele);
-            }
-            return returnAlleles;
-        //multiploid dels
-        } else {
-            for (int i = 0; i < copyNumberCall; i++) {
-                returnAlleles.add(refAllele);
-            }
-            for (int i = copyNumberCall; i < refCopyNumber; i++) {
-                returnAlleles.add(DEL_ALLELE);
-            }
-            return returnAlleles;
-        }
-    }
-
-    /**
-     *
-     * @param copyNumberCall
-     * @param refCopyNumber
-     * @param refAllele
-     * @return variant allele if copyNumberCall != refCopyNumber, else refAllele
-     */
-    private Allele getAlleleForCopyNumber(final int copyNumberCall, final int refCopyNumber, final Allele refAllele) {
-        final Allele allele;
-        if (copyNumberCall > refCopyNumber) {
-            allele = DUP_ALLELE;
-        } else if (copyNumberCall < refCopyNumber) {
-            allele = DEL_ALLELE;
-        } else {
-            allele = refAllele;
-        }
-        return allele;
-    }
-
-    private Set<String> getInfoFilters(final IntegerCopyNumberSegment segment) {
+    private Set<String> getInfoFilters(final IntegerCopyNumberSegment segment, final double alleleFrequency) {
         final Set<String> returnFilters = new LinkedHashSet<>();
         final int qsThreshold;
         if (segment.getCallIntegerCopyNumberState().getCopyNumber() == 0) {
@@ -336,6 +288,9 @@ public final class GermlineCNVSegmentVariantComposer extends GermlineCNVVariantC
         }
         if (segment.getQualitySomeCalled() < qsThreshold) {
             returnFilters.add(GATKSVVCFConstants.LOW_QS_SCORE_FILTER_KEY);
+        }
+        if (alleleFrequency >= siteFreqThreshold) {
+            returnFilters.add(GATKSVVCFConstants.FREQUENCY_FILTER_KEY);
         }
 
         return returnFilters;

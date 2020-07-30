@@ -3,6 +3,7 @@ package org.broadinstitute.hellbender.tools.sv;
 import com.google.common.annotations.VisibleForTesting;
 import htsjdk.samtools.SAMSequenceDictionary;
 import htsjdk.variant.variantcontext.Genotype;
+import htsjdk.variant.variantcontext.GenotypeBuilder;
 import org.broadinstitute.hellbender.exceptions.GATKException;
 import org.broadinstitute.hellbender.exceptions.UserException;
 import org.broadinstitute.hellbender.tools.spark.sv.utils.GATKSVVCFConstants;
@@ -40,10 +41,62 @@ public class SVDepthOnlyCallDefragmenter extends LocatableClusterEngine<SVCallRe
         final SVCallRecordWithEvidence exampleCall = cluster.iterator().next();
         final int length = newEnd - newStart + 1;  //+1 because GATK intervals are inclusive
         final List<String> algorithms = cluster.stream().flatMap(v -> v.getAlgorithms().stream()).distinct().collect(Collectors.toList()); //should be depth only
-        final List<Genotype> clusterGenotypes = cluster.stream().flatMap(v -> v.getGenotypes().stream()).collect(Collectors.toList());
+        final List<Genotype> clusterGenotypes = deduplicateGenotypes(cluster.stream().flatMap(v -> v.getGenotypes().stream()).collect(Collectors.toList()));
         return new SVCallRecordWithEvidence(exampleCall.getContig(), newStart, exampleCall.getStartStrand(),
                 exampleCall.getEndContig(), newEnd, exampleCall.getEndStrand(), exampleCall.getType(), length, algorithms, clusterGenotypes,
                 exampleCall.getStartSplitReadSites(), exampleCall.getEndSplitReadSites(), exampleCall.getDiscordantPairs());
+    }
+
+    protected List<Genotype> deduplicateGenotypes(final List<Genotype> clusterGenotypes) {
+        final Set<String> samples = clusterGenotypes.stream()
+                .filter(Genotype::isCalled)
+                .map(Genotype::getSampleName)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        if (samples.size() == clusterGenotypes.size()) {
+            return clusterGenotypes;
+        }
+        final List<Genotype> mergedGenotypes = new ArrayList<>();
+        final Map<String, List<Genotype>> moreGenotypes = new LinkedHashMap<>();
+        for (final Genotype g : clusterGenotypes) {
+            if (!moreGenotypes.containsKey(g.getSampleName())) {
+                final List<Genotype> newList = new ArrayList<>();
+                newList.add(g);
+                moreGenotypes.put(g.getSampleName(), newList);
+            } else {
+                (moreGenotypes.get(g.getSampleName())).add(g);
+            }
+        }
+        for (final List<Genotype> gList : moreGenotypes.values()) {
+            if (gList.size() > 1) {
+                mergedGenotypes.add(defragmentGenotypes(gList));
+            } else if (gList.size() == 1) {
+                mergedGenotypes.add(gList.get(0));
+            }
+        }
+        return mergedGenotypes;
+    }
+
+    /**
+     *
+     * @param genotypesForSameSample
+     * @return
+     */
+    private Genotype defragmentGenotypes(final List<Genotype> genotypesForSameSample) {
+        final String sampleName = genotypesForSameSample.get(0).getSampleName();
+        if (!genotypesForSameSample.stream().allMatch(g -> g.getSampleName().equals(sampleName))) {
+            throw new IllegalArgumentException("This method expects a list of genotypes from the same sample, " +
+                    "but not all input genotypes represent sample " + sampleName + ".");
+        }
+        final GenotypeBuilder gb = new GenotypeBuilder(genotypesForSameSample.get(0));
+        //For now just make sure genotypes have the same copy number -- qualities will be recalculated elsewhere
+        gb.noAttributes();
+        final int copyNumber = Integer.parseInt(genotypesForSameSample.get(0).getExtendedAttribute(GATKSVVCFConstants.COPY_NUMBER_FORMAT).toString());
+        if (genotypesForSameSample.stream().allMatch(g -> Integer.parseInt(g.getExtendedAttribute(GATKSVVCFConstants.COPY_NUMBER_FORMAT).toString()) == copyNumber)) {
+            gb.attribute(GATKSVVCFConstants.COPY_NUMBER_FORMAT, copyNumber);
+            return gb.make();
+        } else {
+            throw new IllegalArgumentException("This method will only merge genotypes with the same copy number. Expected all genotypes to be copy number " + copyNumber + ".");
+        }
     }
 
     /**

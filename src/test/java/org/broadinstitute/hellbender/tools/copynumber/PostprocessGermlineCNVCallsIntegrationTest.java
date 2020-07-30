@@ -147,7 +147,7 @@ public final class PostprocessGermlineCNVCallsIntegrationTest extends CommandLin
                                                     final File clusteredVCF, File reference) {
         ArgumentsBuilder args = getArgsForSingleSample(callShards, modelShards, sampleIndex, intervalsOutputVCF, segmentsOutputVCF, denoisedCopyRatiosOutput, allosomalContigs, refAutosomalCopyNumber);
         args.add(PostprocessGermlineCNVCalls.CLUSTERED_FILE_LONG_NAME, clusteredVCF);
-        args.add(PostprocessGermlineCNVCalls.COMBINED_INTERVALS_LONG_NAME, combinedIntervalsVCF);
+        args.add(PostprocessGermlineCNVCalls.INPUT_INTERVALS_LONG_NAME, combinedIntervalsVCF);
         if (reference != null) {
             args.addReference(reference);
         }
@@ -258,21 +258,21 @@ public final class PostprocessGermlineCNVCallsIntegrationTest extends CommandLin
         //sample001 has a del and a dup on chromosome 2
         Assert.assertTrue(output2.getRight().stream().anyMatch(vc -> vc.getContig().equals("2") &&
                 vc.isVariant() &&
-                vc.getAlternateAllele(0).equals(GermlineCNVSegmentVariantComposer.DEL_ALLELE) &&
+                vc.getAlternateAllele(0).equals(GATKSVVCFConstants.DEL_ALLELE) &&
                 vc.getGenotype(0).getPloidy() == 2 &&
                 vc.getGenotype(0).isHomVar() && //calls are diploid homVar because CN0
                 vc.getGenotype(0).getExtendedAttribute(GATKSVVCFConstants.COPY_NUMBER_FORMAT).toString().equals("0")));
 
         Assert.assertTrue(output2.getRight().stream().anyMatch(vc -> vc.getContig().equals("2") &&
                 vc.isVariant() &&
-                vc.getAlternateAllele(0).equals(GermlineCNVSegmentVariantComposer.DUP_ALLELE) &&
+                vc.getAlternateAllele(0).equals(GATKSVVCFConstants.DUP_ALLELE) &&
                 vc.getGenotypes().get(0).isNoCall() &&
                 vc.getGenotype(0).getPloidy() == 2 && //dupes on autosomes are diploid no-call
                 vc.getGenotype(0).getExtendedAttribute(GATKSVVCFConstants.COPY_NUMBER_FORMAT).toString().equals("4")));
 
         Assert.assertTrue(output2.getRight().stream().anyMatch(vc -> vc.getContig().equals("X") &&
                 vc.isVariant() &&
-                vc.getAlternateAllele(0).equals(GermlineCNVSegmentVariantComposer.DUP_ALLELE) &&
+                vc.getAlternateAllele(0).equals(GATKSVVCFConstants.DUP_ALLELE) &&
                 vc.getGenotypes().get(0).isHomVar() &&
                 vc.getGenotype(0).getPloidy() == 1 && //dupes on autosomes are diploid no-call
                 vc.getGenotype(0).getExtendedAttribute(GATKSVVCFConstants.COPY_NUMBER_FORMAT).toString().equals("3")));

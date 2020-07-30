@@ -12,6 +12,7 @@ import org.broadinstitute.hellbender.tools.copynumber.formats.collections.Intege
 import org.broadinstitute.hellbender.tools.copynumber.formats.collections.NonOverlappingIntegerCopyNumberSegmentCollection;
 import org.broadinstitute.hellbender.tools.copynumber.formats.collections.NonOverlappingIntegerCopyNumberSegmentCollectionUnitTest;
 import org.broadinstitute.hellbender.tools.copynumber.formats.records.IntegerCopyNumberSegment;
+import org.broadinstitute.hellbender.tools.spark.sv.utils.GATKSVVCFConstants;
 import org.broadinstitute.hellbender.utils.reference.ReferenceUtils;
 import org.broadinstitute.hellbender.utils.variant.GATKVariantContextUtils;
 import org.testng.Assert;
@@ -66,17 +67,17 @@ public final class GermlineCNVSegmentVariantComposerUnitTest extends GATKBaseTes
             } else if (segment.getCallIntegerCopyNumberState().getCopyNumber() > refCopyNumber) {
                 final Allele actualAllele = var.getAlternateAllele(0);
                 Assert.assertEquals(var.getAlternateAlleles().size(), 1);
-                expectedAllele = GermlineCNVSegmentVariantComposer.DUP_ALLELE;
+                expectedAllele = GATKSVVCFConstants.DUP_ALLELE;
                 Assert.assertEquals(actualAllele, expectedAllele);
                 if (refCopyNumber > 1) {
                     Assert.assertTrue(gt.getAlleles().stream().allMatch(a -> a.equals(Allele.NO_CALL)));
                 } else {
-                    Assert.assertEquals(gt.getAllele(0), GermlineCNVSegmentVariantComposer.DUP_ALLELE);
+                    Assert.assertEquals(gt.getAllele(0), GATKSVVCFConstants.DUP_ALLELE);
                 }
             } else { //if (segment.getCallIntegerCopyNumberState().getCopyNumber() < refCopyNumber) {
                 final Allele actualAllele = var.getAlternateAllele(0);
                 Assert.assertEquals(var.getAlternateAlleles().size(), 1);
-                expectedAllele = GermlineCNVSegmentVariantComposer.DEL_ALLELE;
+                expectedAllele = GATKSVVCFConstants.DEL_ALLELE;
                 Assert.assertEquals(actualAllele, expectedAllele);
             }
 

@@ -6,6 +6,7 @@ import htsjdk.variant.variantcontext.Genotype;
 import htsjdk.variant.variantcontext.StructuralVariantType;
 import htsjdk.variant.variantcontext.VariantContext;
 import htsjdk.variant.vcf.VCFConstants;
+import org.broadinstitute.hellbender.exceptions.GATKException;
 import org.broadinstitute.hellbender.tools.copynumber.gcnv.GermlineCNVSegmentVariantComposer;
 import org.broadinstitute.hellbender.tools.spark.sv.utils.GATKSVVCFConstants;
 import org.broadinstitute.hellbender.utils.SimpleInterval;
@@ -75,26 +76,30 @@ public class SVCallRecord implements Feature {
         Utils.validate(variant.getGenotypes().size() == 1, "SVCallRecords can only be created from single-sample VCs.");
 
         final Genotype g = variant.getGenotypes().get(0);
-        if (Integer.valueOf((String)g.getExtendedAttribute(GermlineCNVSegmentVariantComposer.QS)) < minQuality) {
+        //only cluster good variants
+        if (g.isHomRef() || g.isNoCall() || Integer.valueOf((String)g.getExtendedAttribute(GermlineCNVSegmentVariantComposer.QS)) < minQuality) {
             return null;
         }
         final List<String> algorithms = Collections.singletonList(GATKSVVCFConstants.DEPTH_ALGORITHM);
 
         final boolean isDel;
-        //don't cluster homRef events
         if (variant.getReference().equals(Allele.REF_N)) {  //old segments VCFs had ref Ns and genotypes that didn't reflect ploidy accurately
-            if (g.getAlleles().size() != 1) {
-                throw new IllegalArgumentException("Unknown segment VCF schema.  Versions with N* ref allele are assumed to have haploid genotypes.");
-            }
-            if (g.getAllele(0).isReference()) {
-                return null;
-            }
-            if (g.getAllele(0).equals(GermlineCNVSegmentVariantComposer.DEL_ALLELE)) {
+            if (g.getAlleles().stream().anyMatch(a -> a.equals(GATKSVVCFConstants.DEL_ALLELE))) {
                 isDel = true;
-            } else if (g.getAllele(0).equals(GermlineCNVSegmentVariantComposer.DUP_ALLELE)) {
+            } else if (g.getAlleles().stream().anyMatch(a -> a.equals(GATKSVVCFConstants.DUP_ALLELE))) {
                 isDel = false;
+            } else if (g.getAlleles().stream().allMatch(a -> a.isNoCall())) {
+                if (g.hasExtendedAttribute(GATKSVVCFConstants.COPY_NUMBER_FORMAT)) {
+                    if (Integer.parseInt(g.getExtendedAttribute(GATKSVVCFConstants.COPY_NUMBER_FORMAT).toString()) > g.getPloidy()) {
+                        isDel = false;
+                    } else {
+                        isDel = true;
+                    }
+                } else {
+                    throw new IllegalStateException("Genotype for sample " + g.getSampleName() + " at " + variant.getContig() + ":" + variant.getStart() + " had no CN attribute and will be dropped.");
+                }
             } else {
-                throw new IllegalArgumentException("Segment VCF schema expects <DEL> and <DUP> allele, but found " + g.getAllele(0) + " at " + variant.getContig() + ":" + variant.getStart());
+                throw new IllegalArgumentException("Segment VCF schema expects <DEL>, <DUP>, and no-call allele, but found " + g.getAllele(0) + " at " + variant.getContig() + ":" + variant.getStart());
             }
         } else {  //spec-compliant VCFs will have some no-call GTs since dupes can't be phased
             final int ploidy = g.getPloidy();
